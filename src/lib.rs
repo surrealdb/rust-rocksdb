@@ -77,6 +77,7 @@ mod ffi_util;
 
 pub mod backup;
 pub mod checkpoint;
+mod cloud;
 mod column_family;
 pub mod compaction_filter;
 pub mod compaction_filter_factory;
@@ -99,6 +100,9 @@ mod transactions;
 mod write_batch;
 
 pub use crate::{
+    cloud::{
+        CloudBucketOptions, CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB,
+    },
     column_family::{
         AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
         ColumnFamilyRef, DEFAULT_COLUMN_FAMILY_NAME,

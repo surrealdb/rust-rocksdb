@@ -90,6 +90,15 @@ fn build_rocksdb() {
         config.define("USE_RTTI", Some("1"));
     }
 
+    if cfg!(feature = "cloud") {
+        config.define("USE_AWS", Some("1"));
+
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-s3");
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-kinesis");
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-core");
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-transfer");
+    }
+
     config.include(".");
     config.define("NDEBUG", Some("1"));
 
