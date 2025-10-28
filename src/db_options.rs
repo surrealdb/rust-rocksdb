@@ -223,6 +223,7 @@ pub(crate) struct OptionsMustOutliveDB {
     blob_cache: Option<Cache>,
     block_based: Option<BlockBasedOptionsMustOutliveDB>,
     write_buffer_manager: Option<WriteBufferManager>,
+    sst_file_manager: Option<crate::SstFileManager>,
 }
 
 impl OptionsMustOutliveDB {
@@ -236,6 +237,7 @@ impl OptionsMustOutliveDB {
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
             write_buffer_manager: self.write_buffer_manager.clone(),
+            sst_file_manager: self.sst_file_manager.clone(),
         }
     }
 }
@@ -1264,6 +1266,38 @@ impl Options {
             ffi::rocksdb_options_set_env(self.inner, env.0.inner);
         }
         self.outlive.env = Some(env.clone());
+    }
+
+    /// Sets the SstFileManager to use for tracking SST files and controlling
+    /// their deletion rate.
+    ///
+    /// The SstFileManager can be used to:
+    /// * Limit the total size of SST files
+    /// * Control the deletion rate of obsolete files
+    /// * Track the total size of SST files and trash files
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rocksdb::{Env, Options, SstFileManager};
+    ///
+    /// let env = Env::new().unwrap();
+    /// let mut sst_file_manager = SstFileManager::new(&env).unwrap();
+    ///
+    /// // Set a maximum space limit of 10GB
+    /// sst_file_manager.set_max_allowed_space_usage(10 * 1024 * 1024 * 1024);
+    ///
+    /// // Limit deletion rate to 64MB/s
+    /// sst_file_manager.set_delete_rate_bytes_per_second(64 * 1024 * 1024);
+    ///
+    /// let mut opts = Options::default();
+    /// opts.set_sst_file_manager(&sst_file_manager);
+    /// ```
+    pub fn set_sst_file_manager(&mut self, sst_file_manager: &crate::SstFileManager) {
+        unsafe {
+            ffi::rocksdb_options_set_sst_file_manager(self.inner, sst_file_manager.0.inner);
+        }
+        self.outlive.sst_file_manager = Some(sst_file_manager.clone());
     }
 
     /// Sets the compression algorithm that will be used for compressing blocks.
