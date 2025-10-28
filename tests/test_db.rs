@@ -1718,3 +1718,30 @@ fn test_get_approximate_sizes_cf() {
         let _ = DB::destroy(&Options::default(), &path);
     }
 }
+
+#[test]
+fn test_resume() {
+    let path = DBPath::new("_rust_rocksdb_test_resume");
+    {
+        let db = DB::open_default(&path).unwrap();
+
+        // Put some data
+        db.put(b"key1", b"value1").unwrap();
+        db.put(b"key2", b"value2").unwrap();
+
+        // Verify data is there
+        assert_eq!(db.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+
+        // Call resume - it should succeed even if the database is not paused
+        // (Resume is idempotent when not paused)
+        db.resume().unwrap();
+
+        // Verify database still works after resume
+        assert_eq!(db.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(db.get(b"key2").unwrap(), Some(b"value2".to_vec()));
+
+        // Put more data after resume
+        db.put(b"key3", b"value3").unwrap();
+        assert_eq!(db.get(b"key3").unwrap(), Some(b"value3".to_vec()));
+    }
+}
