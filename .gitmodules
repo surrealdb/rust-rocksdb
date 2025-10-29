@@ -3,5 +3,5 @@
 	url = https://github.com/google/snappy.git
 [submodule "rocksdb_sys/rocksdb"]
 	path = librocksdb-sys/rocksdb
-	url = https://github.com/surrealdb/rocksdb.git
-	branch = 10.6.x
+	url = https://github.com/facebook/rocksdb.git
+	branch = v10.6.2

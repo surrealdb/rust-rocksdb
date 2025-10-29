@@ -936,17 +936,6 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(())
     }
 
-    /// Resumes the database operations that were previously paused.
-    ///
-    /// This is typically used after background operations have been paused
-    /// to resume normal database operations.
-    pub fn resume(&self) -> Result<(), Error> {
-        unsafe {
-            ffi_try!(ffi::rocksdb_resume(self.inner.inner()));
-        }
-        Ok(())
-    }
-
     /// Flushes database memtables to SST files on the disk.
     pub fn flush_opt(&self, flushopts: &FlushOptions) -> Result<(), Error> {
         unsafe {
