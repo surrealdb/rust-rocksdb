@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.24.0-surreal.1 (2025-10-30)
+
+This is the SurrealDB fork of rust-rocksdb, based on upstream version 0.24.0.
+
+### Features
+
+- Add complete `SstFileManager` API support (ekeller)
+  - Track SST file sizes and control deletion rates
+  - Set limits on total SST file space usage
+  - Manage compaction buffer size
+  - Query total size and trash size statistics
+  - Control delete rate and max trash-to-DB ratio
+
+### Dependency Updates
+
+- Update to RocksDB v10.6.2 (from v10.4.2) (ekeller)
+- Update Snappy submodule to latest version (ekeller)
+
+### Repository
+
+- Update repository URLs to surrealdb/rust-rocksdb (ekeller)
+- Pin RocksDB submodule to v10.6.2 branch (ekeller)
+
 ## 0.24.0 (2025-08-10)
 
 ### Features

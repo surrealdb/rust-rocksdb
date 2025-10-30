@@ -9,6 +9,6 @@ https://github.com/jsgf/rocksdb-sys
 
 ### Version
 
-The librocksdb-sys version number is in the format `X.Y.Z+RX.RY.RZ`, where
+The surrealdb-librocksdb-sys version number is in the format `X.Y.Z+RX.RY.RZ`, where
 `X.Y.Z` is the version of this crate and follows SemVer conventions, while
 `RX.RY.RZ` is the version of the bundled rocksdb.

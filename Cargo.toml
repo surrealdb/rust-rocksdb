@@ -1,22 +1,25 @@
 [package]
-name = "rocksdb"
+name = "surrealdb-rocksdb"
 description = "Rust wrapper for Facebook's RocksDB embeddable database"
-version = "0.24.0"
+version = "0.24.0-surreal.1"
 edition = "2021"
 rust-version = "1.85.0"
 authors = [
     "Tyler Neely <t@jujit.su>",
     "David Greenberg <dsg123456789@gmail.com>",
 ]
-repository = "https://github.com/rust-rocksdb/rust-rocksdb"
+repository = "https://github.com/surrealdb/rust-rocksdb"
 license = "Apache-2.0"
 categories = ["database"]
 keywords = ["database", "embedded", "LSM-tree", "persistence"]
-homepage = "https://github.com/rust-rocksdb/rust-rocksdb"
+homepage = "https://github.com/surrealdb/rust-rocksdb"
 exclude = [".gitignore", ".travis.yml", "deploy.sh", "test/**/*"]
 
 [workspace]
 members = ["librocksdb-sys"]
+
+[lib]
+name = "rocksdb"
 
 [features]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2", "bindgen-runtime"]
@@ -38,7 +41,7 @@ lto = ["librocksdb-sys/lto"]
 
 [dependencies]
 libc = "0.2"
-librocksdb-sys = { path = "librocksdb-sys", version = "0.17.3", default-features = false, features = [
+librocksdb-sys = { path = "librocksdb-sys", version = "0.17.3", package = "surrealdb-librocksdb-sys",  default-features = false, features = [
     "static",
 ] }
 serde = { version = "1", features = ["derive"], optional = true }

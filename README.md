@@ -1,13 +1,10 @@
 # rust-rocksdb
 
-[![RocksDB build](https://github.com/rust-rocksdb/rust-rocksdb/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/rust-rocksdb/rust-rocksdb/actions/workflows/rust.yml)
-[![crates.io](https://img.shields.io/crates/v/rocksdb.svg)](https://crates.io/crates/rocksdb)
-[![documentation](https://img.shields.io/docsrs/rocksdb/latest)](https://docs.rs/rocksdb)
-[![license](https://img.shields.io/crates/l/rocksdb.svg)](https://github.com/rust-rocksdb/rust-rocksdb/blob/master/LICENSE)
-[![Gitter chat](https://badges.gitter.im/rust-rocksdb/gitter.svg)](https://gitter.im/rust-rocksdb/lobby)
+[![RocksDB build](https://github.com/surrealdb/rust-rocksdb/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/surrealdb/rust-rocksdb/actions/workflows/rust.yml)
+[![crates.io](https://img.shields.io/crates/v/surrealdb-rocksdb.svg)](https://crates.io/crates/surrealdb-rocksdb)
+[![documentation](https://img.shields.io/docsrs/surrealdb-rocksdb/latest)](https://docs.rs/surrealdb-rocksdb)
+[![license](https://img.shields.io/crates/l/surrealdb-rocksdb.svg)](https://github.com/surrealdb/rust-rocksdb/blob/master/LICENSE)
 ![rust 1.85.0 required](https://img.shields.io/badge/rust-1.85.0-blue.svg?label=MSRV)
-
-![GitHub commits (since latest release)](https://img.shields.io/github/commits-since/rust-rocksdb/rust-rocksdb/latest.svg)
 
 ## Requirements
 
@@ -40,7 +37,7 @@ compression algorithms can be enabled. For example, to enable only LZ4
 compression support, make these changes to your Cargo.toml:
 
 ```toml
-[dependencies.rocksdb]
+[dependencies.surrealdb-rocksdb]
 default-features = false
 features = ["lz4"]
 ```
@@ -71,7 +68,7 @@ links to libclang. This is suitable for musllinux platforms, such as Alpine linu
 To build on Alpine linux for example, make these changes to your Cargo.toml:
 
 ```toml
-[dependencies.rocksdb]
+[dependencies.surrealdb-rocksdb]
 default-features = false
 features = ["bindgen-static", "snappy", "lz4", "zstd", "zlib", "bzip2"]
 ```

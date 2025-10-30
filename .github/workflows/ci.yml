@@ -1,0 +1,116 @@
+name: SurrealDB RocksDB CI
+
+on: [ push, workflow_dispatch ]
+env:
+  RUST_VERSION: 1.85.0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
+      - name: Run rustfmt
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev pkg-config libjemalloc-dev
+      - name: Set PKG_CONFIG_PATH
+        run: echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+      - name: Run clippy
+        run: |
+          cargo clippy --all-targets --features \
+            "jemalloc \
+            io-uring \
+            valgrind \
+            mt_static \
+            rtti \
+            multi-threaded-cf \
+            serde1" \
+            -- -D warnings
+
+  test:
+    name: ${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        build: [ Linux, macOS, Windows ]
+        include:
+          - build: Linux
+            os: ubuntu-latest
+          - build: macOS
+            os: macos-latest
+          - build: Windows
+            os: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@nextest
+      - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
+        if: runner.os == 'Windows'
+        run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
+      - name: Install dependencies
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libjemalloc-dev
+      - name: Mark working directory as read-only
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p target
+          touch Cargo.lock
+          git submodule update --init --recursive
+          chmod -R a-w .
+          chmod -R a+w target Cargo.lock
+      - name: Run rocksdb tests
+        run: |
+          cargo nextest run --all
+          cargo nextest run --all --features multi-threaded-cf
+      - name: Mark working directory as writable
+        if: runner.os == 'Linux'
+        run: chmod -R a+w .
+      - name: Free disk space
+        run: cargo clean
+      - name: Mark working directory as read-only
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p target
+          touch Cargo.lock
+          chmod -R a-w .
+          chmod -R a+w target Cargo.lock
+      - name: Run rocksdb tests (jemalloc)
+        if: runner.os != 'Windows'
+        run: cargo nextest run --all --features jemalloc
+      - name: Mark working directory as writable
+        if: runner.os == 'Linux'
+        run: chmod -R a+w .
