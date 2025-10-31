@@ -37,6 +37,8 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Publish crate
         env:
