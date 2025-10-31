@@ -14,6 +14,14 @@ repository = "https://github.com/surrealdb/rust-rocksdb"
 keywords = ["bindings", "ffi", "rocksdb"]
 categories = ["api-bindings", "database", "external-ffi-bindings"]
 links = "rocksdb"
+exclude = [
+    "rocksdb/.git",
+    "rocksdb/docs",
+    "rocksdb/examples",
+    "snappy/.git",
+    "snappy/docs",
+    "snappy/testdata",
+]
 
 [features]
 default = ["static", "bindgen/runtime"]
