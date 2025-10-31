@@ -25,7 +25,6 @@
 )]
 
 use libc::*;
-use surrealdb_librocksdb_sys::*;
 use std::borrow::Cow;
 use std::env;
 use std::ffi::{CStr, CString};
@@ -34,6 +33,7 @@ use std::path::PathBuf;
 use std::ptr;
 use std::slice;
 use std::str;
+use surrealdb_librocksdb_sys::*;
 use uuid::Uuid;
 
 macro_rules! err_println {
