@@ -1,6 +1,6 @@
 name: SurrealDB RocksDB CI
 
-on: [ push, workflow_dispatch ]
+on: [ push, workflow_call ]
 env:
   RUST_VERSION: 1.85.0
   CARGO_TERM_COLOR: always
