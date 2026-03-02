@@ -75,9 +75,7 @@ impl SstFileManager {
     }
 
     pub fn get_delete_rate_bytes_per_second(&self) -> i64 {
-        unsafe {
-            ffi::rocksdb_sst_file_manager_get_delete_rate_bytes_per_second(self.0.inner)
-        }
+        unsafe { ffi::rocksdb_sst_file_manager_get_delete_rate_bytes_per_second(self.0.inner) }
     }
 
     pub fn set_delete_rate_bytes_per_second(&self, delete_rate: i64) {

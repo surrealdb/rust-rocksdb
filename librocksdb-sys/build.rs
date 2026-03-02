@@ -32,14 +32,18 @@ fn rocksdb_include_dir() -> String {
 }
 
 fn bindgen_rocksdb() {
-    let bindings = bindgen::Builder::default()
+    let mut builder = bindgen::Builder::default()
         .header(rocksdb_include_dir() + "/rocksdb/c.h")
         .derive_debug(false)
         .blocklist_type("max_align_t") // https://github.com/rust-lang-nursery/rust-bindgen/issues/550
         .ctypes_prefix("libc")
-        .size_t_is_usize(true)
-        .generate()
-        .expect("unable to generate rocksdb bindings");
+        .size_t_is_usize(true);
+
+    if cfg!(feature = "cloud") {
+        builder = builder.clang_arg("-DROCKSDB_CLOUD");
+    }
+
+    let bindings = builder.generate().expect("unable to generate rocksdb bindings");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
@@ -169,6 +173,42 @@ fn build_rocksdb() {
         // We have a pre-generated a version of build_version.cc in the local directory
         .filter(|file| !matches!(*file, "util/build_version.cc"))
         .collect::<Vec<&'static str>>();
+
+    if cfg!(feature = "cloud") {
+        config.define("ROCKSDB_CLOUD", Some("1"));
+        config.include("rocksdb/cloud/");
+
+        lib_sources.extend(&[
+            "cloud/cloud_file_system.cc",
+            "cloud/cloud_file_system_impl.cc",
+            "cloud/cloud_storage_provider.cc",
+            "cloud/cloud_manifest.cc",
+            "cloud/cloud_scheduler.cc",
+            "cloud/cloud_file_deletion_scheduler.cc",
+            "cloud/db_cloud_impl.cc",
+            "cloud/cloud_optimistic_transaction_db_impl.cc",
+            "cloud/cloud_transaction_db_impl.cc",
+            "cloud/manifest_reader.cc",
+            "cloud/purge.cc",
+            "db/db_impl/replication_codec.cc",
+            "db/replication_epoch_edit.cc",
+        ]);
+    }
+
+    if cfg!(feature = "aws") {
+        config.define("USE_AWS", Some("1"));
+        config.define("HAS_AWS_SDK", Some("1"));
+
+        lib_sources.extend(&[
+            "cloud/aws/aws_file_system.cc",
+            "cloud/aws/aws_s3.cc",
+            "cloud/aws/aws_retry.cc",
+        ]);
+
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-s3");
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-core");
+        println!("cargo:rustc-link-lib=aws-cpp-sdk-transfer");
+    }
 
     // attempt to pass through the RUSTFLAGS -Ctarget-cpu to allow the same optimizations for C/C++
     pass_through_target_cpu(&mut config);

@@ -1,0 +1,276 @@
+use std::ffi::CStr;
+
+use crate::{
+    cloud::{CloudBucketOptions, CloudCredentials},
+    ffi,
+    ffi_util::CStrLike,
+};
+
+/// Cloud file system options controlling how RocksDB interacts with cloud storage.
+///
+/// Persistent cache path and size are stored as Rust fields and passed to the
+/// DB open calls rather than being set on the FFI options object.
+pub struct CloudFileSystemOptions {
+    pub(crate) inner: *mut ffi::rocksdb_cloud_fs_options_t,
+    pub(crate) persistent_cache_path: Option<String>,
+    pub(crate) persistent_cache_size_gb: Option<u64>,
+}
+
+unsafe impl Send for CloudFileSystemOptions {}
+unsafe impl Sync for CloudFileSystemOptions {}
+
+impl Drop for CloudFileSystemOptions {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_destroy(self.inner);
+        }
+    }
+}
+
+impl Default for CloudFileSystemOptions {
+    fn default() -> Self {
+        let inner = unsafe { ffi::rocksdb_cloud_fs_options_create() };
+        assert!(!inner.is_null(), "Could not create CloudFileSystemOptions");
+        Self {
+            inner,
+            persistent_cache_path: None,
+            persistent_cache_size_gb: None,
+        }
+    }
+}
+
+macro_rules! cloud_fs_bool_option {
+    ($set:ident, $get:ident, $ffi_set:ident, $ffi_get:ident) => {
+        pub fn $set(&mut self, val: bool) {
+            unsafe {
+                ffi::$ffi_set(self.inner, val as libc::c_uchar);
+            }
+        }
+
+        pub fn $get(&self) -> bool {
+            unsafe { ffi::$ffi_get(self.inner) != 0 }
+        }
+    };
+}
+
+impl CloudFileSystemOptions {
+    /// Set the source bucket for the cloud file system.
+    pub fn set_src_bucket(&mut self, bucket: &CloudBucketOptions) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_src_bucket(self.inner, bucket.inner);
+        }
+    }
+
+    /// Set the destination bucket for the cloud file system.
+    pub fn set_dest_bucket(&mut self, bucket: &CloudBucketOptions) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_dest_bucket(self.inner, bucket.inner);
+        }
+    }
+
+    /// Set the credentials for the cloud file system.
+    pub fn set_credentials(&mut self, creds: &CloudCredentials) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_credentials(self.inner, creds.inner);
+        }
+    }
+
+    pub fn set_persistent_cache_path(&mut self, path: impl Into<String>) {
+        self.persistent_cache_path = Some(path.into());
+    }
+
+    pub fn set_persistent_cache_size_gb(&mut self, size: u64) {
+        self.persistent_cache_size_gb = Some(size);
+    }
+
+    // Boolean options
+    cloud_fs_bool_option!(
+        set_keep_local_sst_files,
+        get_keep_local_sst_files,
+        rocksdb_cloud_fs_options_set_keep_local_sst_files,
+        rocksdb_cloud_fs_options_get_keep_local_sst_files
+    );
+
+    cloud_fs_bool_option!(
+        set_validate_filesize,
+        get_validate_filesize,
+        rocksdb_cloud_fs_options_set_validate_filesize,
+        rocksdb_cloud_fs_options_get_validate_filesize
+    );
+
+    cloud_fs_bool_option!(
+        set_server_side_encryption,
+        get_server_side_encryption,
+        rocksdb_cloud_fs_options_set_server_side_encryption,
+        rocksdb_cloud_fs_options_get_server_side_encryption
+    );
+
+    cloud_fs_bool_option!(
+        set_create_bucket_if_missing,
+        get_create_bucket_if_missing,
+        rocksdb_cloud_fs_options_set_create_bucket_if_missing,
+        rocksdb_cloud_fs_options_get_create_bucket_if_missing
+    );
+
+    cloud_fs_bool_option!(
+        set_run_purger,
+        get_run_purger,
+        rocksdb_cloud_fs_options_set_run_purger,
+        rocksdb_cloud_fs_options_get_run_purger
+    );
+
+    cloud_fs_bool_option!(
+        set_resync_on_open,
+        get_resync_on_open,
+        rocksdb_cloud_fs_options_set_resync_on_open,
+        rocksdb_cloud_fs_options_get_resync_on_open
+    );
+
+    cloud_fs_bool_option!(
+        set_skip_dbid_verification,
+        get_skip_dbid_verification,
+        rocksdb_cloud_fs_options_set_skip_dbid_verification,
+        rocksdb_cloud_fs_options_get_skip_dbid_verification
+    );
+
+    cloud_fs_bool_option!(
+        set_use_aws_transfer_manager,
+        get_use_aws_transfer_manager,
+        rocksdb_cloud_fs_options_set_use_aws_transfer_manager,
+        rocksdb_cloud_fs_options_get_use_aws_transfer_manager
+    );
+
+    cloud_fs_bool_option!(
+        set_skip_cloud_files_in_getchildren,
+        get_skip_cloud_files_in_getchildren,
+        rocksdb_cloud_fs_options_set_skip_cloud_files_in_getchildren,
+        rocksdb_cloud_fs_options_get_skip_cloud_files_in_getchildren
+    );
+
+    cloud_fs_bool_option!(
+        set_use_direct_io_for_cloud_download,
+        get_use_direct_io_for_cloud_download,
+        rocksdb_cloud_fs_options_set_use_direct_io_for_cloud_download,
+        rocksdb_cloud_fs_options_get_use_direct_io_for_cloud_download
+    );
+
+    cloud_fs_bool_option!(
+        set_roll_cloud_manifest_on_open,
+        get_roll_cloud_manifest_on_open,
+        rocksdb_cloud_fs_options_set_roll_cloud_manifest_on_open,
+        rocksdb_cloud_fs_options_get_roll_cloud_manifest_on_open
+    );
+
+    cloud_fs_bool_option!(
+        set_delete_cloud_invisible_files_on_open,
+        get_delete_cloud_invisible_files_on_open,
+        rocksdb_cloud_fs_options_set_delete_cloud_invisible_files_on_open,
+        rocksdb_cloud_fs_options_get_delete_cloud_invisible_files_on_open
+    );
+
+    // Numeric options
+
+    pub fn set_purger_periodicity_millis(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_purger_periodicity_millis(self.inner, val);
+        }
+    }
+
+    pub fn get_purger_periodicity_millis(&self) -> u64 {
+        unsafe { ffi::rocksdb_cloud_fs_options_get_purger_periodicity_millis(self.inner) }
+    }
+
+    pub fn set_request_timeout_ms(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_request_timeout_ms(self.inner, val);
+        }
+    }
+
+    pub fn get_request_timeout_ms(&self) -> u64 {
+        unsafe { ffi::rocksdb_cloud_fs_options_get_request_timeout_ms(self.inner) }
+    }
+
+    pub fn set_number_objects_listed_in_one_iteration(&mut self, val: i32) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_number_objects_listed_in_one_iteration(
+                self.inner,
+                val as libc::c_int,
+            );
+        }
+    }
+
+    pub fn get_number_objects_listed_in_one_iteration(&self) -> i32 {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_get_number_objects_listed_in_one_iteration(self.inner)
+                as i32
+        }
+    }
+
+    pub fn set_constant_sst_file_size_in_sst_file_manager(&mut self, val: i64) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_constant_sst_file_size_in_sst_file_manager(
+                self.inner, val,
+            );
+        }
+    }
+
+    pub fn get_constant_sst_file_size_in_sst_file_manager(&self) -> i64 {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_get_constant_sst_file_size_in_sst_file_manager(self.inner)
+        }
+    }
+
+    pub fn set_cloud_file_deletion_delay_secs(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_cloud_file_deletion_delay_secs(self.inner, val);
+        }
+    }
+
+    pub fn get_cloud_file_deletion_delay_secs(&self) -> u64 {
+        unsafe { ffi::rocksdb_cloud_fs_options_get_cloud_file_deletion_delay_secs(self.inner) }
+    }
+
+    // String options
+
+    pub fn set_encryption_key_id(&mut self, val: impl CStrLike) {
+        let val = val.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_encryption_key_id(self.inner, val.as_ptr());
+        }
+    }
+
+    pub fn get_encryption_key_id(&self) -> String {
+        unsafe {
+            let ptr = ffi::rocksdb_cloud_fs_options_get_encryption_key_id(self.inner);
+            String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
+        }
+    }
+
+    pub fn set_cookie_on_open(&mut self, val: impl CStrLike) {
+        let val = val.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_cookie_on_open(self.inner, val.as_ptr());
+        }
+    }
+
+    pub fn get_cookie_on_open(&self) -> String {
+        unsafe {
+            let ptr = ffi::rocksdb_cloud_fs_options_get_cookie_on_open(self.inner);
+            String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
+        }
+    }
+
+    pub fn set_new_cookie_on_open(&mut self, val: impl CStrLike) {
+        let val = val.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_new_cookie_on_open(self.inner, val.as_ptr());
+        }
+    }
+
+    pub fn get_new_cookie_on_open(&self) -> String {
+        unsafe {
+            let ptr = ffi::rocksdb_cloud_fs_options_get_new_cookie_on_open(self.inner);
+            String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
+        }
+    }
+}

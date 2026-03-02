@@ -50,6 +50,8 @@ zlib = ["libz-sys"]
 bzip2 = ["bzip2-sys"]
 rtti = []
 lto = []
+cloud = []
+aws = ["cloud"]
 
 [dependencies]
 libc = "0.2"
