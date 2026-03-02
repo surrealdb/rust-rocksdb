@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0-surreal.1 (2026-03-02)
+
+This is the SurrealDB fork of rust-rocksdb, based on upstream version 0.24.0.
+
+### Repository
+
+- Update repository URLs to surrealdb/rust-rocksdb
+- Rename crate to `surrealdb-rocksdb` (lib name remains `rocksdb`)
+- Rename sys crate to `surrealdb-librocksdb-sys`
+
 ## 0.24.0 (2025-08-10)
 
 ### Features

@@ -10,9 +10,9 @@ Thank you for taking an interest in the project, and contributing to it - it's a
 
 ## Bug Reports
 [bug-reports]: #bug-reports
-- **Ensure the bug has not already been reported** - this can be done with a quick search of the [existing open issues](https://github.com/rust-rocksdb/rust-rocksdb/issues?q=is%3Aissue+is%3Aopen+).
+- **Ensure the bug has not already been reported** - this can be done with a quick search of the [existing open issues](https://github.com/surrealdb/rust-rocksdb/issues?q=is%3Aissue+is%3Aopen+).
 - **Ensure the bug applies to the Rust wrapper, and not the underlying library** - bugs in the RocksDB library should be [reported upstream](https://github.com/facebook/rocksdb/issues).
-- When [creating an issue](https://github.com/rust-rocksdb/rust-rocksdb/issues/new) please try to:
+- When [creating an issue](https://github.com/surrealdb/rust-rocksdb/issues/new) please try to:
     - **Use a clear and descriptive title** to identify the issue
     - **Provide enough context** to accurately summarize the issue. Not every issue will need detailed steps to recreate, example code, stack traces, etc. - use your own judgment on what information would be helpful to anyone working on the issue. It's easier for someone to skim over too much context, than stop and wait for a response when context is missing.
 
@@ -30,7 +30,7 @@ Discussion around the design and development of the wrapper primarily occurs wit
 
 ## Pull Requests
 [pull-requests]: #pull-requests
-Pull requests are welcome, and when contributing code, the author agrees to do so under the project's [licensing](https://github.com/rust-rocksdb/rust-rocksdb/blob/master/LICENSE) - Apache 2.0 as of the time of this writing. The maintainers greatly appreciate PRs that follow open-source contribution best practices:
+Pull requests are welcome, and when contributing code, the author agrees to do so under the project's [licensing](https://github.com/surrealdb/rust-rocksdb/blob/master/LICENSE) - Apache 2.0 as of the time of this writing. The maintainers greatly appreciate PRs that follow open-source contribution best practices:
 1. Fork this repository to your personal GitHub account.
 1. Create a branch that includes your changes, **keep changes isolated and granular**.
 1. Include any relevant documentation and/or tests. Write [documentation tests](https://doc.rust-lang.org/rustdoc/documentation-tests.html) when relevant.
