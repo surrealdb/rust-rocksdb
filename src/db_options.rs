@@ -229,6 +229,7 @@ pub(crate) struct OptionsMustOutliveDB {
     blob_cache: Option<Cache>,
     block_based: Option<BlockBasedOptionsMustOutliveDB>,
     write_buffer_manager: Option<WriteBufferManager>,
+    sst_file_manager: Option<crate::SstFileManager>,
     comparator: Option<Arc<OwnedComparator>>,
     compaction_filter: Option<Arc<OwnedCompactionFilter>>,
     logger_callback: Option<Arc<LoggerCallback>>,
@@ -245,6 +246,7 @@ impl OptionsMustOutliveDB {
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
             write_buffer_manager: self.write_buffer_manager.clone(),
+            sst_file_manager: self.sst_file_manager.clone(),
             comparator: self.comparator.clone(),
             compaction_filter: self.compaction_filter.clone(),
             logger_callback: self.logger_callback.clone(),
@@ -3753,6 +3755,17 @@ impl Options {
             );
         }
         self.outlive.write_buffer_manager = Some(write_buffer_manager.clone());
+    }
+
+    /// Sets the SST file manager used to track SST files and control their
+    /// deletion rate.
+    ///
+    /// The manager can be shared across multiple DBs/column families.
+    pub fn set_sst_file_manager(&mut self, sst_file_manager: &crate::SstFileManager) {
+        unsafe {
+            ffi::rocksdb_options_set_sst_file_manager(self.inner, sst_file_manager.0.inner);
+        }
+        self.outlive.sst_file_manager = Some(sst_file_manager.clone());
     }
 
     /// If true, working thread may avoid doing unnecessary and long-latency
