@@ -155,7 +155,7 @@ mod cloud;
 #[cfg(feature = "cloud")]
 pub use crate::cloud::{
     AwsAccessType, CloudBucketOptions, CloudCheckpointOptions, CloudCredentials, CloudDB,
-    CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB,
+    CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB, CloudTransactionDB,
 };
 
 #[cfg(feature = "raw-ptr")]
