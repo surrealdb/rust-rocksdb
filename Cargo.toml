@@ -41,6 +41,7 @@ lto = ["librocksdb-sys/lto"]
 cloud = ["librocksdb-sys/cloud"]
 aws = ["cloud", "librocksdb-sys/aws"]
 gcs = ["cloud", "librocksdb-sys/gcs"]
+encryption = ["librocksdb-sys/encryption"]
 raw-ptr = []
 
 [dependencies]
