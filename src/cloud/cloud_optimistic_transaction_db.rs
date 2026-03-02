@@ -46,11 +46,9 @@ impl Drop for CloudOptimisticTransactionDBInner {
 
 impl CloudOptimisticTransactionDBInner {
     fn flush(&self) -> Result<(), Error> {
+        let opts = crate::FlushOptions::default();
         unsafe {
-            ffi_try!(ffi::rocksdb_flush(
-                self.base,
-                ffi::rocksdb_flushoptions_create()
-            ));
+            ffi_try!(ffi::rocksdb_flush(self.base, opts.inner));
         }
         Ok(())
     }
