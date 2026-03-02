@@ -158,6 +158,14 @@ pub use crate::cloud::{
     CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB, CloudTransactionDB,
 };
 
+#[cfg(feature = "encryption")]
+pub mod encryption;
+
+#[cfg(feature = "encryption")]
+pub use crate::encryption::{
+    create_encrypted_env, EncryptionMethod, FileEncryptionInfo, KeyManager,
+};
+
 #[cfg(feature = "raw-ptr")]
 mod raw_ptr;
 
