@@ -52,6 +52,7 @@ rtti = []
 lto = []
 cloud = []
 aws = ["cloud"]
+gcs = ["cloud", "pkg-config"]
 
 [dependencies]
 libc = "0.2"

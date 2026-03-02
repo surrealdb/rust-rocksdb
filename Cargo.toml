@@ -40,6 +40,7 @@ bindgen-static = ["librocksdb-sys/bindgen-static"]
 lto = ["librocksdb-sys/lto"]
 cloud = ["librocksdb-sys/cloud"]
 aws = ["cloud", "librocksdb-sys/aws"]
+gcs = ["cloud", "librocksdb-sys/gcs"]
 raw-ptr = []
 
 [dependencies]

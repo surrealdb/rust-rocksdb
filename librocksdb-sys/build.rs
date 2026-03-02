@@ -210,6 +210,26 @@ fn build_rocksdb() {
         println!("cargo:rustc-link-lib=aws-cpp-sdk-transfer");
     }
 
+    if cfg!(feature = "gcs") {
+        config.define("USE_GCS", Some("1"));
+
+        lib_sources.extend(&[
+            "cloud/gcp/gcp_cs.cc",
+            "cloud/gcp/gcp_file_system.cc",
+            "cloud/gcp/gcp_retry.cc",
+        ]);
+
+        #[cfg(feature = "gcs")]
+        if let Ok(gcs) = pkg_config::probe_library("google_cloud_cpp_storage") {
+            for path in &gcs.include_paths {
+                config.include(path);
+            }
+        }
+        println!("cargo:rustc-link-lib=google_cloud_cpp_storage");
+        println!("cargo:rustc-link-lib=google_cloud_cpp_rest_internal");
+        println!("cargo:rustc-link-lib=google_cloud_cpp_common");
+    }
+
     // attempt to pass through the RUSTFLAGS -Ctarget-cpu to allow the same optimizations for C/C++
     pass_through_target_cpu(&mut config);
 
