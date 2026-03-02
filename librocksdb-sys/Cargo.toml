@@ -1,5 +1,5 @@
 [package]
-name = "librocksdb-sys"
+name = "surrealdb-librocksdb-sys"
 version = "0.18.0+10.7.5"
 edition = "2021"
 rust-version = "1.85.0"
@@ -10,10 +10,30 @@ authors = [
 license = "MIT/Apache-2.0/BSD-3-Clause"
 description = "Native bindings to librocksdb"
 readme = "README.md"
-repository = "https://github.com/rust-rocksdb/rust-rocksdb"
+repository = "https://github.com/surrealdb/rust-rocksdb"
 keywords = ["bindings", "ffi", "rocksdb"]
 categories = ["api-bindings", "database", "external-ffi-bindings"]
 links = "rocksdb"
+include = [
+    "/src/**/*",
+    "/tests/**/*",
+    "/build.rs",
+    "/rocksdb/**/*",
+    "/snappy/**/*",
+    "/build_version.cc",
+    "/rocksdb_lib_sources.txt",
+    "/snappy-stubs-public.h",
+    "/README.md",
+    "/Cargo.toml",
+    "!**/.git/**",
+    "!/rocksdb/docs/**",
+    "!/rocksdb/examples/**",
+    "!/snappy/docs/**",
+    "!/snappy/testdata/**",
+]
+
+[lib]
+name = "librocksdb_sys"
 
 [features]
 default = ["static", "bindgen/runtime"]

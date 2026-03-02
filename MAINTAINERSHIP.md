@@ -1,3 +1,5 @@
+> **Note**: This maintainership document is inherited from the upstream [rust-rocksdb](https://github.com/rust-rocksdb/rust-rocksdb) project and serves as a reference for this SurrealDB fork. Governance and processes may be adapted to align with SurrealDB's standards.
+
 Maintainers agree to operate under this set of guidelines:
 
 #### Authority
@@ -10,7 +12,7 @@ Maintainers are trusted to close issues, merge pull requests, and publish crates
     * updating the changelog
     * requires no approval
 1. Normal
-    * librocksdb-sys updates
+    * surrealdb-librocksdb-sys updates
     * API tracking code in the rocksdb crate that does not change control flow
     * breaking changes due to removed functionality in rocksdb
     * require 1 approval from another maintainer. if no maintainer is able to be reached for 2 weeks, then progress may be made anyway
