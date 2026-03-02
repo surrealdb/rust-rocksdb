@@ -149,6 +149,15 @@ pub use crate::{
     },
 };
 
+#[cfg(feature = "cloud")]
+mod cloud;
+
+#[cfg(feature = "cloud")]
+pub use crate::cloud::{
+    AwsAccessType, CloudBucketOptions, CloudCheckpointOptions, CloudCredentials, CloudDB,
+    CloudFileSystem, CloudFileSystemOptions,
+};
+
 #[cfg(feature = "raw-ptr")]
 mod raw_ptr;
 
