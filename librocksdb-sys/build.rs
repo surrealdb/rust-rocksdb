@@ -43,7 +43,13 @@ fn bindgen_rocksdb() {
         builder = builder.clang_arg("-DROCKSDB_CLOUD");
     }
 
-    let bindings = builder.generate().expect("unable to generate rocksdb bindings");
+    if cfg!(feature = "encryption") {
+        builder = builder.clang_arg("-DOPENSSL");
+    }
+
+    let bindings = builder
+        .generate()
+        .expect("unable to generate rocksdb bindings");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
@@ -228,6 +234,22 @@ fn build_rocksdb() {
         println!("cargo:rustc-link-lib=google_cloud_cpp_storage");
         println!("cargo:rustc-link-lib=google_cloud_cpp_rest_internal");
         println!("cargo:rustc-link-lib=google_cloud_cpp_common");
+    }
+
+    if cfg!(feature = "encryption") {
+        config.define("OPENSSL", Some("1"));
+        config.include("rocksdb/encryption/");
+
+        lib_sources.push("encryption/encryption.cc");
+
+        #[cfg(feature = "encryption")]
+        if let Ok(openssl) = pkg_config::probe_library("openssl") {
+            for path in &openssl.include_paths {
+                config.include(path);
+            }
+        }
+        println!("cargo:rustc-link-lib=ssl");
+        println!("cargo:rustc-link-lib=crypto");
     }
 
     // attempt to pass through the RUSTFLAGS -Ctarget-cpu to allow the same optimizations for C/C++
