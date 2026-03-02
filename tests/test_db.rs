@@ -1789,3 +1789,22 @@ fn test_enable_and_disable_file_deletions() {
         let _ = DB::destroy(&Options::default(), &path);
     }
 }
+
+#[test]
+fn test_resume() {
+    let path = DBPath::new("_rust_rocksdb_test_resume");
+    {
+        let db = DB::open_default(&path).unwrap();
+        db.put(b"key1", b"value1").unwrap();
+        db.put(b"key2", b"value2").unwrap();
+        assert_eq!(db.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+
+        // resume() should succeed even if the database is not paused
+        db.resume().unwrap();
+
+        assert_eq!(db.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(db.get(b"key2").unwrap(), Some(b"value2".to_vec()));
+        db.put(b"key3", b"value3").unwrap();
+        assert_eq!(db.get(b"key3").unwrap(), Some(b"value3".to_vec()));
+    }
+}

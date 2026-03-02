@@ -901,6 +901,18 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         }
         Ok(())
     }
+
+    /// Resumes database operations that were previously paused due to an error.
+    ///
+    /// When RocksDB encounters certain errors (e.g., no space left on device),
+    /// it may pause background work. After the underlying issue is resolved,
+    /// calling `resume()` allows the database to continue normal operations.
+    pub fn resume(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_resume(self.inner.inner()));
+        }
+        Ok(())
+    }
 }
 
 /// Common methods of `DBWithThreadMode` and `OptimisticTransactionDB`.
