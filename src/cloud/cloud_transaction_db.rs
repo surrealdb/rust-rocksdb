@@ -295,10 +295,11 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
 
     /// Flushes all memtables to ensure data is uploaded to cloud.
     pub fn flush(&self) -> Result<(), Error> {
+        let opts = crate::FlushOptions::default();
         unsafe {
             ffi_try!(ffi::rocksdb_transactiondb_flush(
                 self.txn_db,
-                ffi::rocksdb_flushoptions_create(),
+                opts.inner,
             ));
         }
         Ok(())
