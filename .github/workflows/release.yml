@@ -29,28 +29,50 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Publish crate
+      - name: Publish librocksdb-sys
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cd librocksdb-sys
-          cargo publish
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "surrealdb-librocksdb-sys") | .version')
+          BASE_VERSION=$(echo "$VERSION" | sed 's/+.*//')
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/surrealdb-librocksdb-sys/$BASE_VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "surrealdb-librocksdb-sys@$VERSION already published, skipping."
+            echo "SYS_PUBLISHED=false" >> "$GITHUB_ENV"
+          else
+            echo "Publishing surrealdb-librocksdb-sys@$VERSION..."
+            cargo publish
+            echo "SYS_PUBLISHED=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Wait for crates.io to index the package
+        if: env.SYS_PUBLISHED == 'true'
         run: |
-          echo "Waiting for surrealdb-librocksdb-sys to be available on crates.io..."
+          VERSION=$(cd librocksdb-sys && cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "surrealdb-librocksdb-sys") | .version')
+          BASE_VERSION=$(echo "$VERSION" | sed 's/+.*//')
+          echo "Waiting for surrealdb-librocksdb-sys@$VERSION to be indexed on crates.io..."
           for i in {1..30}; do
-            if cargo search surrealdb-librocksdb-sys | grep -q "surrealdb-librocksdb-sys"; then
-              echo "Package found on crates.io!"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/surrealdb-librocksdb-sys/$BASE_VERSION")
+            if [ "$STATUS" = "200" ]; then
+              echo "Package indexed on crates.io!"
               exit 0
             fi
-            echo "Attempt $i/30: Package not yet available, waiting 10 seconds..."
+            echo "Attempt $i/30: Not yet indexed (HTTP $STATUS), waiting 10 seconds..."
             sleep 10
           done
-          echo "ERROR: Package still not available after 5 minutes"
+          echo "ERROR: Package still not indexed after 5 minutes"
           exit 1
 
-      - name: Publish main crate
+      - name: Publish surrealdb-rocksdb
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "surrealdb-rocksdb") | .version')
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/surrealdb-rocksdb/$VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "surrealdb-rocksdb@$VERSION already published, skipping."
+          else
+            echo "Publishing surrealdb-rocksdb@$VERSION..."
+            cargo publish
+          fi
