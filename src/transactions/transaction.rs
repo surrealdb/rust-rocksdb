@@ -890,6 +890,33 @@ impl<DB> Transaction<'_, DB> {
         }
         Ok(())
     }
+
+    /// Sets the commit timestamp for this transaction.
+    ///
+    /// When using user-defined timestamps with a column family whose comparator
+    /// has a non-zero timestamp size, this timestamp is applied to all keys in
+    /// the transaction's write batch at commit time.
+    ///
+    /// Must be called before [`commit`](Transaction::commit) when writing to
+    /// timestamp-enabled column families.
+    pub fn set_commit_timestamp(&self, ts: u64) {
+        unsafe {
+            ffi::rocksdb_transaction_set_commit_timestamp(self.inner, ts);
+        }
+    }
+
+    /// Sets the read timestamp used for conflict validation.
+    ///
+    /// When user-defined timestamp validation is enabled, a write conflict is
+    /// detected if any key read by this transaction was subsequently written
+    /// with a timestamp newer than the specified read timestamp.
+    ///
+    /// The read timestamp can only be increased, not decreased.
+    pub fn set_read_timestamp_for_validation(&self, ts: u64) {
+        unsafe {
+            ffi::rocksdb_transaction_set_read_timestamp_for_validation(self.inner, ts);
+        }
+    }
 }
 
 impl<DB> Drop for Transaction<'_, DB> {
