@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    ffi::CString,
+    ffi::{CStr, CString},
     fs, iter,
     marker::PhantomData,
     path::{Path, PathBuf},
@@ -11,7 +11,7 @@ use std::{
 use libc::{c_char, c_int, c_void, size_t};
 
 use crate::{
-    cloud::CloudFileSystem,
+    cloud::{CloudFileSystem, ForkPoint},
     column_family::{ColumnFamilyTtl, UnboundColumnFamily},
     db::{convert_values, DBAccess},
     db_options::OptionsMustOutliveDB,
@@ -300,6 +300,34 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
             ffi_try!(ffi::rocksdb_transactiondb_flush(self.txn_db, opts.inner,));
         }
         Ok(())
+    }
+
+    /// Capture a fork point: the current epoch, next file number, and
+    /// CLOUDMANIFEST cookie. This is a metadata-only operation.
+    pub fn capture_fork_point(&self) -> Result<ForkPoint, Error> {
+        unsafe {
+            let mut epoch_ptr: *mut c_char = std::ptr::null_mut();
+            let mut file_number: u64 = 0;
+            let mut cookie_ptr: *mut c_char = std::ptr::null_mut();
+
+            ffi_try!(ffi::rocksdb_cloud_txn_db_capture_fork_point(
+                self.cloud_db,
+                &mut epoch_ptr,
+                &mut file_number,
+                &mut cookie_ptr,
+            ));
+
+            let epoch = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
+            let cookie = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
+            libc::free(epoch_ptr as *mut c_void);
+            libc::free(cookie_ptr as *mut c_void);
+
+            Ok(ForkPoint {
+                epoch,
+                file_number,
+                cloud_manifest_cookie: cookie,
+            })
+        }
     }
 
     pub fn path(&self) -> &Path {
