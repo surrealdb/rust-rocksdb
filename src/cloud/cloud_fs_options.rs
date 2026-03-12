@@ -295,4 +295,40 @@ impl CloudFileSystemOptions {
             ffi::rocksdb_cloud_fs_options_clear_fallback_buckets(self.inner);
         }
     }
+
+    /// Set a rate limiter for cloud upload operations (SST, MANIFEST, etc.).
+    /// Pass rate_bytes_per_sec <= 0 to disable throttling.
+    pub fn set_cloud_upload_rate_limiter(
+        &mut self,
+        rate_bytes_per_sec: i64,
+        refill_period_us: i64,
+        fairness: i32,
+    ) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_cloud_upload_rate_limiter(
+                self.inner,
+                rate_bytes_per_sec,
+                refill_period_us,
+                fairness,
+            );
+        }
+    }
+
+    /// Set a rate limiter for cloud download operations (SST, MANIFEST, range reads).
+    /// Pass rate_bytes_per_sec <= 0 to disable throttling.
+    pub fn set_cloud_download_rate_limiter(
+        &mut self,
+        rate_bytes_per_sec: i64,
+        refill_period_us: i64,
+        fairness: i32,
+    ) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_cloud_download_rate_limiter(
+                self.inner,
+                rate_bytes_per_sec,
+                refill_period_us,
+                fairness,
+            );
+        }
+    }
 }
