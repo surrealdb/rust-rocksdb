@@ -273,4 +273,26 @@ impl CloudFileSystemOptions {
             String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
         }
     }
+
+    // Fallback bucket options
+
+    /// Add a fallback bucket to search when an SST file is not found in the
+    /// dest or src buckets. Fallbacks are tried in the order they are added.
+    pub fn add_fallback_bucket(&mut self, bucket: &CloudBucketOptions) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_add_fallback_bucket(self.inner, bucket.inner);
+        }
+    }
+
+    /// Returns the number of fallback buckets configured.
+    pub fn num_fallback_buckets(&self) -> usize {
+        unsafe { ffi::rocksdb_cloud_fs_options_get_num_fallback_buckets(self.inner) as usize }
+    }
+
+    /// Remove all fallback buckets.
+    pub fn clear_fallback_buckets(&mut self) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_clear_fallback_buckets(self.inner);
+        }
+    }
 }
