@@ -351,6 +351,25 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         }
     }
 
+    /// Returns the timestamp of the current entry when User-Defined Timestamps
+    /// (UDT) are enabled on the column family. Returns `None` if the iterator
+    /// is not valid.
+    pub fn timestamp(&self) -> Option<&[u8]> {
+        if self.valid() {
+            unsafe {
+                let mut ts_len: size_t = 0;
+                let ts_ptr = ffi::rocksdb_iter_timestamp(self.inner.as_ptr(), &mut ts_len);
+                if ts_ptr.is_null() || ts_len == 0 {
+                    None
+                } else {
+                    Some(slice::from_raw_parts(ts_ptr as *const u8, ts_len))
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     /// Returns a slice of the current key; assumes the iterator is valid.
     fn key_impl(&self) -> &[u8] {
         // Safety Note: This is safe as all methods that may invalidate the buffer returned

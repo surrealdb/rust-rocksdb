@@ -1119,6 +1119,81 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         self.get_pinned_cf_opt(cf, key, &ReadOptions::default())
     }
 
+    /// Return the value and matched timestamp for a key in the given column
+    /// family. Requires User-Defined Timestamps (UDT) to be enabled on the
+    /// column family via `set_comparator_with_ts`. The `ReadOptions` must have
+    /// a timestamp set via `set_timestamp`.
+    ///
+    /// Returns `Ok((Some(value), Some(matched_ts)))` when a version is found,
+    /// `Ok((None, None))` when no version exists at or before the read
+    /// timestamp.
+    pub fn get_cf_with_ts_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        readopts: &ReadOptions,
+    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>), Error> {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        unsafe {
+            let mut val_len: size_t = 0;
+            let mut ts_ptr: *mut c_char = ptr::null_mut();
+            let mut ts_len: size_t = 0;
+            let mut err: *mut c_char = ptr::null_mut();
+
+            let val_ptr = ffi::rocksdb_get_cf_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &mut val_len,
+                &mut ts_ptr,
+                &mut ts_len,
+                &mut err,
+            );
+
+            if !err.is_null() {
+                return Err(Error::new(crate::ffi_util::error_message(err)));
+            }
+
+            if val_ptr.is_null() {
+                Ok((None, None))
+            } else {
+                let value = slice::from_raw_parts(val_ptr as *const u8, val_len).to_vec();
+                libc::free(val_ptr as *mut c_void);
+
+                let ts = if !ts_ptr.is_null() && ts_len > 0 {
+                    let ts_vec = slice::from_raw_parts(ts_ptr as *const u8, ts_len).to_vec();
+                    libc::free(ts_ptr as *mut c_void);
+                    Some(ts_vec)
+                } else {
+                    None
+                };
+
+                Ok((Some(value), ts))
+            }
+        }
+    }
+
+    /// Return the value and matched timestamp for a key in the given column
+    /// family using default read options. Convenience wrapper around
+    /// `get_cf_with_ts_opt`.
+    pub fn get_cf_with_ts<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>), Error> {
+        self.get_cf_with_ts_opt(cf, key, &ReadOptions::default())
+    }
+
     /// Return the values associated with the given keys.
     pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>
     where
