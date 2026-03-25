@@ -10,7 +10,7 @@ mod cloud_transaction_db;
 pub use cloud_bucket_options::CloudBucketOptions;
 pub use cloud_checkpoint_options::CloudCheckpointOptions;
 pub use cloud_credentials::{AwsAccessType, CloudCredentials};
-pub use cloud_db::{CloudDB, ForkPoint};
+pub use cloud_db::{BranchInfo, CloudDB, CreateBranchOptions, ForkPoint};
 pub use cloud_fs::CloudFileSystem;
 pub use cloud_fs_options::CloudFileSystemOptions;
 pub use cloud_optimistic_transaction_db::CloudOptimisticTransactionDB;

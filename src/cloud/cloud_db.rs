@@ -11,6 +11,33 @@ use crate::{
     ColumnFamilyDescriptor, Error, FlushOptions, Options, ThreadMode, DEFAULT_COLUMN_FAMILY_NAME,
 };
 
+/// Options for creating a zero-copy branch.
+pub struct CreateBranchOptions {
+    /// If true, flush memtable to SSTs before branching.
+    pub flush_memtable: bool,
+    /// If true (and flush_memtable is false), copy WAL files from S3 to the
+    /// child's path so the branch includes unflushed data.
+    pub include_wal: bool,
+}
+
+impl Default for CreateBranchOptions {
+    fn default() -> Self {
+        Self {
+            flush_memtable: false,
+            include_wal: true,
+        }
+    }
+}
+
+/// Information about a branch of a cloud database.
+#[derive(Debug, Clone)]
+pub struct BranchInfo {
+    /// The DBID of the branch.
+    pub dbid: String,
+    /// The S3/GCS object path of the branch.
+    pub object_path: String,
+}
+
 /// A lightweight snapshot of the current CloudManifest position for branching.
 /// Contains the epoch, next file number, and CLOUDMANIFEST cookie needed to
 /// create a zero-copy branch.
@@ -296,6 +323,67 @@ impl<T: ThreadMode> CloudDB<T> {
                 file_number,
                 cloud_manifest_cookie: cookie,
             })
+        }
+    }
+
+    /// Create a zero-copy branch of this database at the given destination.
+    /// The branch shares the parent's SST files via fallback_buckets.
+    pub fn create_branch(
+        &self,
+        destination: &CloudBucketOptions,
+        options: &CreateBranchOptions,
+    ) -> Result<BranchInfo, Error> {
+        unsafe {
+            let mut dbid_ptr: *mut c_char = std::ptr::null_mut();
+            ffi_try!(ffi::rocksdb_cloud_db_create_branch(
+                self.inner.db,
+                destination.inner,
+                options.flush_memtable as libc::c_uchar,
+                options.include_wal as libc::c_uchar,
+                &mut dbid_ptr,
+            ));
+            let dbid = CStr::from_ptr(dbid_ptr).to_string_lossy().into_owned();
+            libc::free(dbid_ptr as *mut libc::c_void);
+            Ok(BranchInfo {
+                dbid,
+                object_path: destination.get_object_path(),
+            })
+        }
+    }
+
+    /// Detach this database from its parent branch, copying all referenced
+    /// parent SSTs into this database's own path.
+    pub fn detach_branch(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_cloud_db_detach_branch(self.inner.db));
+        }
+        Ok(())
+    }
+
+    /// List all child branches of this database.
+    pub fn list_branches(&self) -> Result<Vec<BranchInfo>, Error> {
+        unsafe {
+            let mut dbids_ptr: *mut *mut c_char = std::ptr::null_mut();
+            let mut paths_ptr: *mut *mut c_char = std::ptr::null_mut();
+            let mut count: size_t = 0;
+            ffi_try!(ffi::rocksdb_cloud_db_list_branches(
+                self.inner.db,
+                &mut dbids_ptr,
+                &mut paths_ptr,
+                &mut count,
+            ));
+            let mut result = Vec::with_capacity(count);
+            for i in 0..count {
+                let dbid = CStr::from_ptr(*dbids_ptr.add(i))
+                    .to_string_lossy()
+                    .into_owned();
+                let object_path = CStr::from_ptr(*paths_ptr.add(i))
+                    .to_string_lossy()
+                    .into_owned();
+                result.push(BranchInfo { dbid, object_path });
+            }
+            ffi::rocksdb_cloud_db_free_branch_list(dbids_ptr, paths_ptr, count);
+            Ok(result)
         }
     }
 

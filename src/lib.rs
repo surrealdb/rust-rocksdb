@@ -154,9 +154,9 @@ mod cloud;
 
 #[cfg(feature = "cloud")]
 pub use crate::cloud::{
-    AwsAccessType, CloudBucketOptions, CloudCheckpointOptions, CloudCredentials, CloudDB,
-    CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB, CloudTransactionDB,
-    ForkPoint,
+    AwsAccessType, BranchInfo, CloudBucketOptions, CloudCheckpointOptions, CloudCredentials,
+    CloudDB, CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB,
+    CloudTransactionDB, CreateBranchOptions, ForkPoint,
 };
 
 #[cfg(feature = "encryption")]
