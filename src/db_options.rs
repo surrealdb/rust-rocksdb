@@ -1973,6 +1973,22 @@ impl Options {
         }
     }
 
+    /// Controls how many SST files have their metadata (index, filter, etc.)
+    /// loaded eagerly during initial DB::Open(). The effective limit for
+    /// positive values is min(limit, table_cache_capacity / 4).
+    /// Set to 0 to open all files. Set to -1 to use table_cache_capacity/4.
+    /// Default: 16
+    pub fn set_initial_table_load_limit(&mut self, limit: c_int) {
+        unsafe {
+            ffi::rocksdb_options_set_initial_table_load_limit(self.inner, limit);
+        }
+    }
+
+    /// Returns the current initial table load limit.
+    pub fn get_initial_table_load_limit(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_initial_table_load_limit(self.inner) }
+    }
+
     /// By default, writes to stable storage use fdatasync (on platforms
     /// where this function is available). If this option is true,
     /// fsync is used instead.

@@ -148,6 +148,31 @@ impl CloudFileSystemOptions {
     );
 
     cloud_fs_bool_option!(
+        set_skip_cloud_listing_on_open,
+        get_skip_cloud_listing_on_open,
+        rocksdb_cloud_fs_options_set_skip_cloud_listing_on_open,
+        rocksdb_cloud_fs_options_get_skip_cloud_listing_on_open
+    );
+
+    /// Set the number of TLS connections to pre-establish with the cloud
+    /// storage endpoint during initialization. Set to 0 to disable.
+    pub fn set_warm_connection_pool_size(&mut self, val: i32) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_warm_connection_pool_size(
+                self.inner,
+                val as libc::c_int,
+            );
+        }
+    }
+
+    /// Returns the configured warm connection pool size.
+    pub fn get_warm_connection_pool_size(&self) -> i32 {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_get_warm_connection_pool_size(self.inner) as i32
+        }
+    }
+
+    cloud_fs_bool_option!(
         set_use_direct_io_for_cloud_download,
         get_use_direct_io_for_cloud_download,
         rocksdb_cloud_fs_options_set_use_direct_io_for_cloud_download,
