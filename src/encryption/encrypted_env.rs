@@ -171,20 +171,24 @@ unsafe fn write_file_info(
     iv_len: *mut size_t,
 ) {
     *method = info.method as c_int;
-    *key_len = info.key.len();
     *key = libc::malloc(info.key.len()) as *mut c_char;
-    if !(*key).is_null() {
+    if (*key).is_null() {
+        *key_len = 0;
+    } else {
+        *key_len = info.key.len();
         std::ptr::copy_nonoverlapping(info.key.as_ptr(), *key as *mut u8, info.key.len());
     }
-    *iv_len = info.iv.len();
     *iv = libc::malloc(info.iv.len()) as *mut c_char;
-    if !(*iv).is_null() {
+    if (*iv).is_null() {
+        *iv_len = 0;
+    } else {
+        *iv_len = info.iv.len();
         std::ptr::copy_nonoverlapping(info.iv.as_ptr(), *iv as *mut u8, info.iv.len());
     }
 }
 
 unsafe fn set_error(errptr: *mut *mut c_char, e: Error) {
-    if let Ok(cs) = CString::new(e.into_string()) {
-        *errptr = cs.into_raw();
-    }
+    let msg = e.into_string();
+    let cs = CString::new(msg).unwrap_or_else(|_| CString::new("unknown error").unwrap());
+    *errptr = cs.into_raw();
 }
