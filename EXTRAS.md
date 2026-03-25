@@ -115,3 +115,13 @@ for zero-copy database branching.
 Getters/setters for `cloud_upload_rate_limiter` and
 `cloud_download_rate_limiter` on `CloudFileSystemOptions`, enabling
 per-instance throttling of S3/GCS upload and download bandwidth.
+
+## Serverless cold start optimization bindings
+
+Rust bindings for three new cold start optimization options:
+- `set_skip_cloud_listing_on_open` / `get_skip_cloud_listing_on_open` on
+  `CloudFileSystemOptions` — skip cloud object listing during DB open
+- `set_warm_connection_pool_size` / `get_warm_connection_pool_size` on
+  `CloudFileSystemOptions` — pre-warm TLS connections at init time
+- `set_initial_table_load_limit` / `get_initial_table_load_limit` on
+  `Options` — control how many SST files are opened during DB::Open

@@ -258,6 +258,10 @@ opts.set_encryption_key_id("alias/my-kms-key");
 // Configure persistent cache (local SSD cache for cloud reads)
 opts.set_persistent_cache_path("/mnt/ssd/cache");
 opts.set_persistent_cache_size_gb(50);
+
+// Cold start optimizations
+opts.set_skip_cloud_listing_on_open(true);
+opts.set_warm_connection_pool_size(4);
 ```
 
 See the [full option reference](#full-option-reference) for every available
@@ -1176,6 +1180,114 @@ cloud_opts.set_cloud_upload_rate_limiter(0, 0, 0);
 
 ---
 
+## Cold start optimization
+
+When running RocksDB in serverless or ephemeral environments, the time to
+open a cloud-backed database can be a bottleneck. The following options reduce
+cold start latency.
+
+### Skip cloud listing during open
+
+During `DB::Open`, RocksDB calls `GetChildren` multiple times. By default,
+each call lists objects in all configured cloud buckets — an expensive
+operation when there are many files or fallback buckets. When
+`skip_cloud_listing_on_open` is enabled, cloud listing is suppressed during
+the open phase only. After `DB::Open` returns, `GetChildren` resumes normal
+behavior.
+
+This is safe when `resync_on_open` is true, because the freshly-fetched
+MANIFEST is authoritative for the set of live files.
+
+```rust
+use rocksdb::CloudFileSystemOptions;
+
+let mut cloud_opts = CloudFileSystemOptions::default();
+cloud_opts.set_resync_on_open(true);
+cloud_opts.set_skip_cloud_listing_on_open(true);
+```
+
+### Connection pool pre-warming
+
+TLS handshakes to S3/GCS can add 100-300ms per connection. By default, only
+one connection is established during initialization (for the bucket existence
+check). Setting `warm_connection_pool_size` to a positive value causes that
+many lightweight HEAD requests to be issued in parallel during
+initialization, pre-establishing TLS connections before the first real
+download.
+
+```rust
+use rocksdb::CloudFileSystemOptions;
+
+let mut cloud_opts = CloudFileSystemOptions::default();
+cloud_opts.set_warm_connection_pool_size(4);
+```
+
+### Initial table load limit
+
+When opening a database, RocksDB eagerly loads metadata (index, filter) for
+a limited number of SST files. The rest are opened lazily on first access,
+which can cause latency spikes on the first queries. The
+`initial_table_load_limit` option on `Options` controls this (for positive
+values the effective limit is `min(limit, table_cache_capacity / 4)`):
+
+- Default (`16`): load at most 16 tables per column family during open
+- `0`: load all tables (eliminates first-query latency at the cost of
+  longer open time)
+- `-1`: use `table_cache_capacity / 4` with no additional limit
+
+Pair with `max_file_opening_threads` to parallelize the table opens.
+
+```rust
+use rocksdb::Options;
+
+let mut opts = Options::default();
+opts.set_initial_table_load_limit(0);
+opts.set_max_file_opening_threads(32);
+```
+
+### Combined example
+
+A serverless-optimized open combining all cold start options:
+
+```rust
+use rocksdb::{
+    Options, CloudFileSystemOptions, CloudFileSystem,
+    CloudDB, CloudBucketOptions, CloudCredentials, AwsAccessType,
+};
+
+fn open_serverless() -> Result<(), rocksdb::Error> {
+    let mut creds = CloudCredentials::default();
+    creds.set_type(AwsAccessType::Environment);
+
+    let mut bucket = CloudBucketOptions::default();
+    bucket.set_bucket_name("my-bucket");
+    bucket.set_region("us-east-1");
+    bucket.set_object_path("db/production");
+
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    cloud_opts.set_credentials(&creds);
+    cloud_opts.set_dest_bucket(&bucket);
+
+    // Cold start optimizations
+    cloud_opts.set_resync_on_open(true);
+    cloud_opts.set_skip_cloud_listing_on_open(true);
+    cloud_opts.set_warm_connection_pool_size(4);
+
+    let cloud_fs = CloudFileSystem::new(&cloud_opts)?;
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.set_env(&cloud_fs.create_cloud_env()?);
+    opts.set_initial_table_load_limit(0);
+    opts.set_max_file_opening_threads(32);
+
+    let db = CloudDB::open(&opts, &cloud_fs, "/tmp/serverless_db")?;
+    Ok(())
+}
+```
+
+---
+
 ## Encryption at rest
 
 The `encryption` feature provides transparent data-at-rest encryption using
@@ -1385,6 +1497,7 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `set_use_direct_io_for_cloud_download` / `get_use_direct_io_for_cloud_download` | `false` | Use O_DIRECT for cloud downloads  |
 | `set_roll_cloud_manifest_on_open` / `get_roll_cloud_manifest_on_open` | varies | Roll the cloud manifest epoch on open |
 | `set_delete_cloud_invisible_files_on_open` / `get_delete_cloud_invisible_files_on_open` | varies | Delete locally invisible cloud files on open |
+| `set_skip_cloud_listing_on_open` / `get_skip_cloud_listing_on_open` | `false` | Skip cloud object listing during DB open |
 
 #### Numeric options
 
@@ -1395,6 +1508,7 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `set_number_objects_listed_in_one_iteration` / `get_number_objects_listed_in_one_iteration` | `i32` | Page size for cloud list operations |
 | `set_constant_sst_file_size_in_sst_file_manager` / `get_constant_sst_file_size_in_sst_file_manager` | `i64` | Override SST file size reported to the file manager |
 | `set_cloud_file_deletion_delay_secs` / `get_cloud_file_deletion_delay_secs` | `u64` | Delay before deleting cloud files (seconds) |
+| `set_warm_connection_pool_size` / `get_warm_connection_pool_size` | `i32` | Number of TLS connections to pre-warm (0 = disabled) |
 
 #### String options
 
