@@ -19,6 +19,11 @@ the full option reference.
   - [CloudTransactionDB](#cloudtransactiondb)
   - [CloudOptimisticTransactionDB](#cloudoptimistictransactiondb)
 - [Column families](#column-families)
+- [Read-only replicas](#read-only-replicas)
+  - [Basic replica pattern](#basic-replica-pattern)
+  - [Replica with column families](#replica-with-column-families)
+  - [How it works](#how-it-works)
+  - [Limitations](#limitations)
 - [Cloud checkpoints](#cloud-checkpoints)
 - [Incremental backups](#incremental-backups)
   - [Basic usage](#basic-usage)
@@ -507,6 +512,182 @@ let txn = db.transaction();
 txn.put_cf(&cf, b"txn_key", b"txn_value")?;
 txn.commit()?;
 ```
+
+---
+
+## Read-only replicas
+
+A read-only replica points at the same S3 bucket and object path as a
+primary writer. Each time the replica opens, it downloads the latest
+CLOUDMANIFEST and MANIFEST from S3 and replays any SST changes since the
+last open. The replica never writes to cloud storage.
+
+### Basic replica pattern
+
+The primary database is opened normally. The replica uses
+`CloudDB::open_read_only` with `resync_on_open` enabled so that every open
+fetches the latest metadata from S3. To see new data written by the
+primary, close and re-open the replica.
+
+```rust
+use rocksdb::{
+    Options, CloudCredentials, AwsAccessType,
+    CloudBucketOptions, CloudFileSystemOptions,
+    CloudFileSystem, CloudDB,
+};
+use std::time::Duration;
+
+fn open_replica(
+    bucket_name: &str,
+    region: &str,
+    object_path: &str,
+    local_path: &str,
+) -> Result<CloudDB, rocksdb::Error> {
+    let mut creds = CloudCredentials::default();
+    creds.set_type(AwsAccessType::Environment);
+
+    // Same bucket and object path as the primary writer
+    let mut bucket = CloudBucketOptions::default();
+    bucket.set_bucket_name(bucket_name);
+    bucket.set_region(region);
+    bucket.set_object_path(object_path);
+
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    cloud_opts.set_credentials(&creds);
+    cloud_opts.set_dest_bucket(&bucket);
+
+    // Fetch fresh CLOUDMANIFEST / MANIFEST from S3 on every open
+    cloud_opts.set_resync_on_open(true);
+    // Do not roll a new epoch — the replica is read-only
+    cloud_opts.set_roll_cloud_manifest_on_open(false);
+    // Cache SST files locally so re-opens only download new files
+    cloud_opts.set_keep_local_sst_files(true);
+    // The replica must not delete cloud files
+    cloud_opts.set_run_purger(false);
+    cloud_opts.set_delete_cloud_invisible_files_on_open(false);
+    // Bucket already exists
+    cloud_opts.set_create_bucket_if_missing(false);
+    // Skip DBID check — the replica's local DBID may not match
+    cloud_opts.set_skip_dbid_verification(true);
+
+    let cloud_fs = CloudFileSystem::new(&cloud_opts)?;
+
+    let mut db_opts = Options::default();
+    db_opts.create_if_missing(false);
+    db_opts.set_env(&cloud_fs.create_cloud_env()?);
+
+    CloudDB::open_read_only(&db_opts, &cloud_fs, local_path)
+}
+
+// Periodically re-open to pick up the primary's latest writes
+fn replica_loop() -> Result<(), rocksdb::Error> {
+    loop {
+        let db = open_replica(
+            "my-rocksdb-bucket",
+            "us-east-1",
+            "db/production",
+            "/tmp/replica_local",
+        )?;
+
+        if let Some(val) = db.get(b"some_key")? {
+            println!("value: {:?}", val);
+        }
+
+        // Drop and re-open to catch up with the primary
+        drop(db);
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+```
+
+### Replica with column families
+
+Read-only replicas support column families through
+`CloudDB::open_cf_descriptors`. The column families must match those
+created by the primary.
+
+```rust
+use rocksdb::{
+    Options, ColumnFamilyDescriptor, CloudCredentials, AwsAccessType,
+    CloudBucketOptions, CloudFileSystemOptions, CloudFileSystem, CloudDB,
+};
+
+fn open_replica_with_cfs() -> Result<(), rocksdb::Error> {
+    let mut creds = CloudCredentials::default();
+    creds.set_type(AwsAccessType::Environment);
+
+    let mut bucket = CloudBucketOptions::default();
+    bucket.set_bucket_name("my-rocksdb-bucket");
+    bucket.set_region("us-east-1");
+    bucket.set_object_path("db/production");
+
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    cloud_opts.set_credentials(&creds);
+    cloud_opts.set_dest_bucket(&bucket);
+    cloud_opts.set_resync_on_open(true);
+    cloud_opts.set_roll_cloud_manifest_on_open(false);
+    cloud_opts.set_keep_local_sst_files(true);
+    cloud_opts.set_run_purger(false);
+    cloud_opts.set_delete_cloud_invisible_files_on_open(false);
+    cloud_opts.set_create_bucket_if_missing(false);
+    cloud_opts.set_skip_dbid_verification(true);
+
+    let cloud_fs = CloudFileSystem::new(&cloud_opts)?;
+
+    let mut db_opts = Options::default();
+    db_opts.create_if_missing(false);
+    db_opts.create_missing_column_families(false);
+    db_opts.set_env(&cloud_fs.create_cloud_env()?);
+
+    let db = CloudDB::open_cf_descriptors(
+        &db_opts,
+        &cloud_fs,
+        "/tmp/replica_cf",
+        vec![
+            ColumnFamilyDescriptor::new("cf1", Options::default()),
+            ColumnFamilyDescriptor::new("cf2", Options::default()),
+        ],
+    )?;
+
+    let cf = db.cf_handle("cf1").unwrap();
+    if let Some(val) = db.get_cf(&cf, b"key")? {
+        println!("cf1 value: {:?}", val);
+    }
+
+    Ok(())
+}
+```
+
+### How it works
+
+When the primary writes data, SST files and MANIFEST updates are
+automatically uploaded to S3 by the cloud file system. On the replica:
+
+1. **`resync_on_open`** forces the cloud file system to download the
+   latest CLOUDMANIFEST and MANIFEST from S3 during
+   `SanitizeLocalDirectory`, even if local copies already exist.
+2. **`keep_local_sst_files`** caches SST files on the replica's local
+   disk. On subsequent opens only newly-created SSTs are downloaded,
+   making re-opens fast.
+3. **`roll_cloud_manifest_on_open(false)`** prevents the replica from
+   creating a new cloud manifest epoch, which would conflict with the
+   primary.
+4. The replica opens with `DB::OpenForReadOnly` under the hood, so all
+   write operations return an error.
+
+### Limitations
+
+- **Point-in-time snapshots.** Each open is a frozen snapshot of the
+  primary's state at the time of the last flush or compaction. The replica
+  does not see unflushed memtable data. To pick up new writes, close and
+  re-open.
+- **No live tailing.** Unlike `DB::open_as_secondary` (which supports
+  `try_catch_up_with_primary` for local-disk secondaries), the cloud
+  read-only open does not support incremental catch-up. Each refresh
+  requires a full close/re-open cycle.
+- **Single primary writer.** Only one database instance may write to a
+  given cloud bucket and object path at a time. Multiple read-only
+  replicas may read from the same path concurrently.
 
 ---
 
