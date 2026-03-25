@@ -199,6 +199,7 @@ fn build_rocksdb() {
             "cloud/cloud_transaction_db_impl.cc",
             "cloud/manifest_reader.cc",
             "cloud/purge.cc",
+            "cloud/local_sst_cache.cc",
             "db/db_impl/replication_codec.cc",
             "db/replication_epoch_edit.cc",
         ]);
