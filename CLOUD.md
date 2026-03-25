@@ -20,6 +20,12 @@ the full option reference.
   - [CloudOptimisticTransactionDB](#cloudoptimistictransactiondb)
 - [Column families](#column-families)
 - [Cloud checkpoints](#cloud-checkpoints)
+- [Incremental backups](#incremental-backups)
+  - [Basic usage](#basic-usage)
+  - [Backing up to S3](#backing-up-to-s3)
+  - [Automated backup loop](#automated-backup-loop)
+  - [Restoring from backup](#restoring-from-backup)
+  - [Combining backups with encryption](#combining-backups-with-encryption)
 - [Zero-copy branching](#zero-copy-branching)
   - [Fork points](#fork-points)
   - [Fallback buckets](#fallback-buckets)
@@ -537,6 +543,277 @@ db.checkpoint_to_cloud(&dest, &cp_opts)?;
 
 ---
 
+## Incremental backups
+
+`BackupEngine` provides a managed, incremental backup system on top of
+RocksDB. Unlike cloud checkpoints (which copy the entire database state each
+time), `BackupEngine` deduplicates SST and blob files across backups so that
+only new or changed files are transferred. It also maintains a catalog of
+numbered backups with verification, retention policies, and point-in-time
+restore.
+
+| Feature                     | Cloud checkpoint          | BackupEngine                      |
+|-----------------------------|---------------------------|-----------------------------------|
+| Incremental / deduplicated  | No (full copy each time)  | Yes (shared SST files by default) |
+| Backup catalog              | No                        | Yes (numbered, with metadata)     |
+| Point-in-time restore       | Manual (one snapshot)     | Any retained backup ID            |
+| Integrity verification      | No                        | `verify_backup()` with checksums  |
+| Retention policy            | Manual deletion           | `purge_old_backups(n)`            |
+| Destination                 | Cloud bucket              | Any `Env` (local, S3, etc.)       |
+
+### Basic usage
+
+A minimal backup to a local directory:
+
+```rust
+use rocksdb::{
+    backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
+    Env, DB, Options,
+};
+
+fn main() -> Result<(), rocksdb::Error> {
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    let db = DB::open(&opts, "/tmp/my_db")?;
+
+    db.put(b"key", b"value")?;
+
+    // Open a backup engine targeting a local directory
+    let env = Env::new()?;
+    let backup_opts = BackupEngineOptions::new("/tmp/my_backups")?;
+    let mut backup_engine = BackupEngine::open(&backup_opts, &env)?;
+
+    // Create a backup (flush_before_backup = true captures memtable data)
+    backup_engine.create_new_backup_flush(&db, true)?;
+
+    // Verify the latest backup
+    let backups = backup_engine.get_backup_info();
+    for b in &backups {
+        backup_engine.verify_backup(b.backup_id)?;
+        println!(
+            "Backup #{}: {} bytes, {} files, ts={}",
+            b.backup_id, b.size, b.num_files, b.timestamp,
+        );
+    }
+
+    // Keep only the 3 most recent backups
+    backup_engine.purge_old_backups(3)?;
+
+    Ok(())
+}
+```
+
+Subsequent calls to `create_new_backup` or `create_new_backup_flush` are
+incremental — SST files already present in the backup directory are not
+copied again. This is the default behavior (`share_table_files` defaults to
+`true` in the underlying C++ engine).
+
+### Backing up to S3
+
+`BackupEngine::open` accepts any `Env`, including a cloud-backed one created
+from `CloudFileSystem`. This makes backup files flow directly to S3:
+
+```rust
+use rocksdb::{
+    backup::{BackupEngine, BackupEngineOptions},
+    CloudBucketOptions, CloudCredentials, CloudFileSystem,
+    CloudFileSystemOptions, AwsAccessType,
+    CloudDB, Options,
+};
+
+fn backup_to_s3(db: &CloudDB) -> Result<(), rocksdb::Error> {
+    // Configure a cloud file system pointing to the backup bucket
+    let mut creds = CloudCredentials::default();
+    creds.set_type(AwsAccessType::Environment);
+
+    let mut backup_bucket = CloudBucketOptions::default();
+    backup_bucket.set_bucket_name("my-backup-bucket");
+    backup_bucket.set_region("us-east-1");
+    backup_bucket.set_object_path("backups/production");
+
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    cloud_opts.set_credentials(&creds);
+    cloud_opts.set_dest_bucket(&backup_bucket);
+    cloud_opts.set_create_bucket_if_missing(true);
+
+    // Enable S3 server-side encryption (SSE-KMS)
+    cloud_opts.set_server_side_encryption(true);
+    cloud_opts.set_encryption_key_id("arn:aws:kms:us-east-1:123456789:key/my-key");
+
+    let backup_fs = CloudFileSystem::new(&cloud_opts)?;
+    let backup_env = backup_fs.create_cloud_env()?;
+
+    // Open the backup engine — files are written to S3 through backup_env
+    let backup_opts = BackupEngineOptions::new("backups/production")?;
+    let mut engine = BackupEngine::open(&backup_opts, &backup_env)?;
+
+    // Incremental backup (only new SSTs are uploaded)
+    engine.create_new_backup_flush(db, true)?;
+
+    // Verify and retain
+    let info = engine.get_backup_info();
+    if let Some(latest) = info.last() {
+        engine.verify_backup(latest.backup_id)?;
+    }
+    engine.purge_old_backups(5)?;
+
+    Ok(())
+}
+```
+
+The `BackupEngineOptions::new` path becomes a prefix within the cloud bucket.
+The backup engine's incremental deduplication works across cloud-backed
+backups the same way it does locally — shared SST files are stored once and
+referenced by multiple backup IDs.
+
+### Automated backup loop
+
+`BackupEngine` is `Send`, so it can be driven from a background thread or a
+`tokio::task::spawn_blocking` closure. Here is a minimal periodic backup
+loop:
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use rocksdb::{
+    backup::{BackupEngine, BackupEngineOptions},
+    Env, DB,
+};
+
+fn spawn_backup_loop(
+    db: Arc<DB>,
+    backup_dir: String,
+    interval: Duration,
+    max_backups: usize,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(interval);
+
+        let env = match Env::new() {
+            Ok(e) => e,
+            Err(e) => { eprintln!("env error: {e}"); continue; }
+        };
+        let opts = match BackupEngineOptions::new(&backup_dir) {
+            Ok(o) => o,
+            Err(e) => { eprintln!("opts error: {e}"); continue; }
+        };
+        let mut engine = match BackupEngine::open(&opts, &env) {
+            Ok(e) => e,
+            Err(e) => { eprintln!("open error: {e}"); continue; }
+        };
+
+        if let Err(e) = engine.create_new_backup_flush(&*db, true) {
+            eprintln!("backup failed: {e}");
+            continue;
+        }
+
+        // Verify the new backup
+        let info = engine.get_backup_info();
+        if let Some(latest) = info.last() {
+            if let Err(e) = engine.verify_backup(latest.backup_id) {
+                eprintln!("verification failed for #{}: {e}", latest.backup_id);
+            }
+        }
+
+        if let Err(e) = engine.purge_old_backups(max_backups) {
+            eprintln!("purge failed: {e}");
+        }
+    })
+}
+```
+
+To back up to S3 instead, replace the `Env::new()` call with a cloud env
+created from a `CloudFileSystem` (see [Backing up to S3](#backing-up-to-s3)).
+
+### Restoring from backup
+
+Restore to a target directory (which must differ from the backup directory):
+
+```rust
+use rocksdb::{
+    backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
+    Env, DB, Options,
+};
+
+fn restore_latest(backup_dir: &str, restore_dir: &str) -> Result<(), rocksdb::Error> {
+    let env = Env::new()?;
+    let opts = BackupEngineOptions::new(backup_dir)?;
+    let mut engine = BackupEngine::open(&opts, &env)?;
+
+    let restore_opts = RestoreOptions::default();
+    engine.restore_from_latest_backup(restore_dir, restore_dir, &restore_opts)?;
+
+    // Open the restored database
+    let db = DB::open_default(restore_dir)?;
+    let val = db.get(b"key")?;
+    println!("restored value: {:?}", val);
+
+    Ok(())
+}
+
+fn restore_specific(backup_dir: &str, restore_dir: &str) -> Result<(), rocksdb::Error> {
+    let env = Env::new()?;
+    let opts = BackupEngineOptions::new(backup_dir)?;
+    let mut engine = BackupEngine::open(&opts, &env)?;
+
+    // List available backups
+    for b in engine.get_backup_info() {
+        println!("Backup #{}: ts={}, size={}", b.backup_id, b.timestamp, b.size);
+    }
+
+    // Restore a specific backup by ID
+    let restore_opts = RestoreOptions::default();
+    engine.restore_from_backup(restore_dir, restore_dir, &restore_opts, 3)?;
+
+    Ok(())
+}
+```
+
+`RestoreOptions` supports `set_keep_log_files(true)` to preserve existing
+WAL files in the restore directory, which can be combined with
+`BackupEngineOptions::backup_log_files(false)` for in-memory database
+persistence workflows.
+
+### Combining backups with encryption
+
+When the primary database uses client-side encryption (via the `encryption`
+feature), `BackupEngine` reads decrypted data in process memory during the
+copy. To keep backup files encrypted at rest, configure encryption on the
+backup side as well:
+
+```rust
+use rocksdb::{
+    backup::{BackupEngine, BackupEngineOptions},
+    CloudFileSystemOptions, CloudFileSystem,
+    Options, CloudDB,
+};
+
+fn encrypted_backup_to_s3(db: &CloudDB) -> Result<(), rocksdb::Error> {
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    // ... configure backup bucket and credentials ...
+
+    // Server-side encryption on the backup bucket (SSE-KMS)
+    cloud_opts.set_server_side_encryption(true);
+    cloud_opts.set_encryption_key_id("arn:aws:kms:us-east-1:123456789:key/backup-key");
+
+    let backup_fs = CloudFileSystem::new(&cloud_opts)?;
+    let backup_env = backup_fs.create_cloud_env()?;
+
+    let opts = BackupEngineOptions::new("backups/encrypted")?;
+    let mut engine = BackupEngine::open(&opts, &backup_env)?;
+    engine.create_new_backup_flush(db, true)?;
+
+    Ok(())
+}
+```
+
+For defense-in-depth, you can also layer client-side encryption on the backup
+env using `create_encrypted_env` (see [Encryption at rest](#encryption-at-rest)),
+providing double encryption: AES-CTR before the data leaves the process,
+plus SSE-KMS at the S3 storage layer.
+
+---
+
 ## Zero-copy branching
 
 Zero-copy branching allows creating lightweight database branches that share
@@ -979,6 +1256,40 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `set_object_path` / `get_object_path` | `String` | Logical object path            |
 | `read_from_env`              | `&str` (prefix)| Populate from environment variables |
 | `is_valid`                   | `bool`         | Whether the configuration is valid |
+
+### BackupEngineOptions
+
+| Method / Getter                                        | Type   | Default | Description                                          |
+|--------------------------------------------------------|--------|---------|------------------------------------------------------|
+| `new(backup_dir)`                                      | `Path` | —       | Create options targeting the given backup directory   |
+| `set_max_background_operations`                        | `i32`  | `1`     | Parallel file copy / checksum operations             |
+| `set_sync` / `get_sync`                                | `bool` | `true`  | fsync after every file write for crash consistency   |
+
+> **Note:** The underlying C++ `BackupEngineOptions` has additional fields
+> (`share_table_files`, `destroy_old_data`, `backup_log_files`,
+> `backup_rate_limit`, `restore_rate_limit`, etc.) that are available in the
+> C API but not yet wrapped in the Rust `BackupEngineOptions` struct.
+> `share_table_files` defaults to `true` in the C++ engine, so incremental
+> deduplication works out of the box.
+
+### BackupEngine
+
+| Method                                                   | Description                                              |
+|----------------------------------------------------------|----------------------------------------------------------|
+| `open(opts, env)`                                        | Open or create a backup engine for the given `Env`       |
+| `create_new_backup(db)`                                  | Capture a backup (no flush)                              |
+| `create_new_backup_flush(db, flush)`                     | Capture a backup, optionally flushing the memtable       |
+| `purge_old_backups(n)`                                   | Retain only the `n` most recent backups                  |
+| `verify_backup(id)`                                      | Check file existence and sizes for a backup              |
+| `get_backup_info()`                                      | List all backups with ID, timestamp, size, and file count|
+| `restore_from_latest_backup(db_dir, wal_dir, opts)`      | Restore the most recent backup                           |
+| `restore_from_backup(db_dir, wal_dir, opts, id)`         | Restore a specific backup by ID                          |
+
+### RestoreOptions
+
+| Method                   | Default | Description                                            |
+|--------------------------|---------|--------------------------------------------------------|
+| `set_keep_log_files`     | `false` | If true, don't overwrite existing WAL files on restore |
 
 ### CloudCheckpointOptions
 
