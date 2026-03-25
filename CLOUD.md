@@ -23,6 +23,7 @@ the full option reference.
 - [Zero-copy branching](#zero-copy-branching)
   - [Fork points](#fork-points)
   - [Fallback buckets](#fallback-buckets)
+- [Cross-region replication](#cross-region-replication)
 - [Bandwidth throttling](#bandwidth-throttling)
 - [Encryption at rest](#encryption-at-rest)
 - [SST file manager](#sst-file-manager)
@@ -616,6 +617,71 @@ assert_eq!(cloud_opts.num_fallback_buckets(), 2);
 
 ---
 
+## Cross-region replication
+
+Replication buckets replicate SST files, MANIFEST, and CLOUDMANIFEST to one or
+more remote regions asynchronously. SST data is replicated in the background;
+metadata files are only written to replication targets once the corresponding
+SST uploads complete. This gives you cross-region durability without blocking
+the write path.
+
+```rust
+use rocksdb::{
+    CloudBucketOptions, CloudCredentials, CloudFileSystem,
+    CloudFileSystemOptions, AwsAccessType, CloudDB, Options,
+};
+
+fn main() -> Result<(), rocksdb::Error> {
+    let mut creds = CloudCredentials::default();
+    creds.set_type(AwsAccessType::Environment);
+
+    // Primary bucket (us-east-1)
+    let mut primary = CloudBucketOptions::default();
+    primary.set_bucket_name("my-db-bucket-us-east-1");
+    primary.set_region("us-east-1");
+    primary.set_object_path("db/production");
+
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    cloud_opts.set_credentials(&creds);
+    cloud_opts.set_dest_bucket(&primary);
+    cloud_opts.set_create_bucket_if_missing(true);
+
+    // Replicate to eu-west-1
+    let mut eu_replica = CloudBucketOptions::default();
+    eu_replica.set_bucket_name("my-db-bucket-eu-west-1");
+    eu_replica.set_region("eu-west-1");
+    eu_replica.set_object_path("db/production");
+    cloud_opts.add_replication_bucket(&eu_replica);
+
+    // Replicate to ap-southeast-1
+    let mut ap_replica = CloudBucketOptions::default();
+    ap_replica.set_bucket_name("my-db-bucket-ap-southeast-1");
+    ap_replica.set_region("ap-southeast-1");
+    ap_replica.set_object_path("db/production");
+    cloud_opts.add_replication_bucket(&ap_replica);
+
+    assert_eq!(cloud_opts.num_replication_buckets(), 2);
+
+    let cloud_fs = CloudFileSystem::new(&cloud_opts)?;
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.set_env(&cloud_fs.create_cloud_env()?);
+
+    let db = CloudDB::open(&opts, &cloud_fs, "/tmp/replicated_db")?;
+
+    db.put(b"key", b"value")?;
+    db.close()?;
+
+    Ok(())
+}
+```
+
+Use `clear_replication_buckets()` to remove all configured replication targets
+(for example, before re-configuring them on a subsequent open).
+
+---
+
 ## Bandwidth throttling
 
 Per-instance upload and download rate limiting prevents a single database
@@ -887,6 +953,14 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `add_fallback_bucket`   | Add a fallback bucket (searched in order when file not found)|
 | `num_fallback_buckets`  | Number of configured fallback buckets                        |
 | `clear_fallback_buckets`| Remove all fallback buckets                                  |
+
+#### Replication buckets
+
+| Method                      | Description                                                              |
+|-----------------------------|--------------------------------------------------------------------------|
+| `add_replication_bucket`    | Add a bucket for async cross-region SST/MANIFEST/CLOUDMANIFEST replication |
+| `num_replication_buckets`   | Number of configured replication buckets                                 |
+| `clear_replication_buckets` | Remove all replication buckets                                           |
 
 #### Bandwidth throttling
 

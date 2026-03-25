@@ -296,6 +296,27 @@ impl CloudFileSystemOptions {
         }
     }
 
+    /// Add a replication bucket for cross-region SST/MANIFEST/CLOUDMANIFEST
+    /// replication. SSTs are replicated asynchronously; metadata files are
+    /// gated on SST completion.
+    pub fn add_replication_bucket(&mut self, bucket: &CloudBucketOptions) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_add_replication_bucket(self.inner, bucket.inner);
+        }
+    }
+
+    /// Returns the number of replication buckets configured.
+    pub fn num_replication_buckets(&self) -> usize {
+        unsafe { ffi::rocksdb_cloud_fs_options_num_replication_buckets(self.inner) as usize }
+    }
+
+    /// Remove all replication buckets.
+    pub fn clear_replication_buckets(&mut self) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_clear_replication_buckets(self.inner);
+        }
+    }
+
     /// Set a rate limiter for cloud upload operations (SST, MANIFEST, etc.).
     /// Pass rate_bytes_per_sec <= 0 to disable throttling.
     pub fn set_cloud_upload_rate_limiter(
