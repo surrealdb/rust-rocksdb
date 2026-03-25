@@ -90,7 +90,7 @@ impl<T: ThreadMode> DBAccess for CloudTransactionDB<T> {
         &self,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_opt(key, readopts)
     }
 
@@ -99,7 +99,7 @@ impl<T: ThreadMode> DBAccess for CloudTransactionDB<T> {
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_cf_opt(cf, key, readopts)
     }
 
@@ -317,10 +317,20 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
                 &mut cookie_ptr,
             ));
 
-            let epoch = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
-            let cookie = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
-            libc::free(epoch_ptr as *mut c_void);
-            libc::free(cookie_ptr as *mut c_void);
+            let epoch = if epoch_ptr.is_null() {
+                String::new()
+            } else {
+                let s = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
+                libc::free(epoch_ptr as *mut c_void);
+                s
+            };
+            let cookie = if cookie_ptr.is_null() {
+                String::new()
+            } else {
+                let s = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
+                libc::free(cookie_ptr as *mut c_void);
+                s
+            };
 
             Ok(ForkPoint {
                 epoch,
@@ -335,7 +345,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
     }
 
     /// Creates a transaction with default options.
-    pub fn transaction(&self) -> Transaction<Self> {
+    pub fn transaction(&self) -> Transaction<'_, Self> {
         self.transaction_opt(&WriteOptions::default(), &TransactionOptions::default())
     }
 
@@ -359,7 +369,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
     }
 
     /// Get all prepared transactions for recovery.
-    pub fn prepared_transactions(&self) -> Vec<Transaction<Self>> {
+    pub fn prepared_transactions(&self) -> Vec<Transaction<'_, Self>> {
         self.prepared
             .lock()
             .unwrap()
@@ -403,7 +413,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
             .map(|x| x.map(|v| v.as_ref().to_vec()))
     }
 
-    pub fn get_pinned<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<DBPinnableSlice>, Error> {
+    pub fn get_pinned<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_opt(key, &ReadOptions::default())
     }
 
@@ -411,7 +421,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_cf_opt(cf, key, &ReadOptions::default())
     }
 
@@ -419,7 +429,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
         &self,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         let key = key.as_ref();
         unsafe {
             let val = ffi_try!(ffi::rocksdb_transactiondb_get_pinned(
@@ -441,7 +451,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         let key = key.as_ref();
         unsafe {
             let val = ffi_try!(ffi::rocksdb_transactiondb_get_pinned_cf(

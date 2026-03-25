@@ -217,8 +217,9 @@ impl<T: ThreadMode> CloudOptimisticTransactionDB<T> {
         ))
     }
 
-    /// Flushes all memtables to ensure data is uploaded to cloud, then closes the DB.
-    pub fn close(&self) -> Result<(), Error> {
+    /// Flushes all memtables to ensure data is persisted to cloud storage.
+    /// Note: The database handle is released when this CloudOptimisticTransactionDB is dropped.
+    pub fn flush(&self) -> Result<(), Error> {
         self.inner.flush()
     }
 
@@ -237,10 +238,20 @@ impl<T: ThreadMode> CloudOptimisticTransactionDB<T> {
                 &mut cookie_ptr,
             ));
 
-            let epoch = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
-            let cookie = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
-            libc::free(epoch_ptr as *mut libc::c_void);
-            libc::free(cookie_ptr as *mut libc::c_void);
+            let epoch = if epoch_ptr.is_null() {
+                String::new()
+            } else {
+                let s = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
+                libc::free(epoch_ptr as *mut libc::c_void);
+                s
+            };
+            let cookie = if cookie_ptr.is_null() {
+                String::new()
+            } else {
+                let s = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
+                libc::free(cookie_ptr as *mut libc::c_void);
+                s
+            };
 
             Ok(ForkPoint {
                 epoch,
@@ -251,7 +262,7 @@ impl<T: ThreadMode> CloudOptimisticTransactionDB<T> {
     }
 
     /// Creates a transaction with default options.
-    pub fn transaction(&self) -> Transaction<Self> {
+    pub fn transaction(&self) -> Transaction<'_, Self> {
         self.transaction_opt(
             &WriteOptions::default(),
             &OptimisticTransactionOptions::default(),
@@ -263,7 +274,7 @@ impl<T: ThreadMode> CloudOptimisticTransactionDB<T> {
         &self,
         writeopts: &WriteOptions,
         otxn_opts: &OptimisticTransactionOptions,
-    ) -> Transaction<Self> {
+    ) -> Transaction<'_, Self> {
         let otxn_db = unsafe { ffi::rocksdb_cloud_otxn_db_get_txn_db(self.inner.db) };
         Transaction {
             inner: unsafe {

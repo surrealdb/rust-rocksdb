@@ -269,8 +269,9 @@ impl<T: ThreadMode> CloudDB<T> {
         ))
     }
 
-    /// Flushes all memtables to ensure data is uploaded to cloud, then closes the DB.
-    pub fn close(&self) -> Result<(), Error> {
+    /// Flushes all memtables to ensure data is persisted to cloud storage.
+    /// Note: The database handle is released when this CloudDB is dropped.
+    pub fn flush(&self) -> Result<(), Error> {
         self.inner.flush()
     }
 
@@ -313,10 +314,20 @@ impl<T: ThreadMode> CloudDB<T> {
                 &mut cookie_ptr,
             ));
 
-            let epoch = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
-            let cookie = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
-            libc::free(epoch_ptr as *mut libc::c_void);
-            libc::free(cookie_ptr as *mut libc::c_void);
+            let epoch = if epoch_ptr.is_null() {
+                String::new()
+            } else {
+                let s = CStr::from_ptr(epoch_ptr).to_string_lossy().into_owned();
+                libc::free(epoch_ptr as *mut libc::c_void);
+                s
+            };
+            let cookie = if cookie_ptr.is_null() {
+                String::new()
+            } else {
+                let s = CStr::from_ptr(cookie_ptr).to_string_lossy().into_owned();
+                libc::free(cookie_ptr as *mut libc::c_void);
+                s
+            };
 
             Ok(ForkPoint {
                 epoch,
@@ -372,6 +383,9 @@ impl<T: ThreadMode> CloudDB<T> {
                 &mut paths_ptr,
                 &mut count,
             ));
+            if count > 0 && (dbids_ptr.is_null() || paths_ptr.is_null()) {
+                return Err(Error::new("list_branches returned null arrays".to_string()));
+            }
             let mut result = Vec::with_capacity(count);
             for i in 0..count {
                 let dbid = CStr::from_ptr(*dbids_ptr.add(i))

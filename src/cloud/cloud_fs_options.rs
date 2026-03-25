@@ -167,9 +167,7 @@ impl CloudFileSystemOptions {
 
     /// Returns the configured warm connection pool size.
     pub fn get_warm_connection_pool_size(&self) -> i32 {
-        unsafe {
-            ffi::rocksdb_cloud_fs_options_get_warm_connection_pool_size(self.inner) as i32
-        }
+        unsafe { ffi::rocksdb_cloud_fs_options_get_warm_connection_pool_size(self.inner) as i32 }
     }
 
     cloud_fs_bool_option!(
@@ -332,7 +330,7 @@ impl CloudFileSystemOptions {
 
     /// Returns the number of replication buckets configured.
     pub fn num_replication_buckets(&self) -> usize {
-        unsafe { ffi::rocksdb_cloud_fs_options_num_replication_buckets(self.inner) as usize }
+        unsafe { ffi::rocksdb_cloud_fs_options_get_num_replication_buckets(self.inner) as usize }
     }
 
     /// Remove all replication buckets.
