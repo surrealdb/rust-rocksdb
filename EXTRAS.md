@@ -1,6 +1,6 @@
 # SurrealDB Extras for `rust-rocksdb`
 
-This document describes the changes in the `0.24.0-surreal.2` branch compared
+This document describes the changes in the `0.24.0-surreal.3` branch compared
 to upstream `main`. These additions provide Rust bindings for the SurrealDB
 cloud extensions to RocksDB.
 
