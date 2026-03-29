@@ -30,6 +30,49 @@ impl WalKafkaSyncMode {
     }
 }
 
+/// WAL sources for read replica catch-up. Combine with bitwise OR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadReplicaWALSource(u32);
+
+impl ReadReplicaWALSource {
+    /// Scan local WAL directory (default).
+    pub const LOCAL: Self = Self(0x1);
+    /// Download WAL from cloud object storage (S3/GCS).
+    pub const CLOUD: Self = Self(0x2);
+    /// Consume WAL from Kafka.
+    pub const KAFKA: Self = Self(0x4);
+
+    /// Create from raw bits.
+    pub const fn from_bits(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// Return the raw bits.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::ops::BitOr for ReadReplicaWALSource {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for ReadReplicaWALSource {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAnd for ReadReplicaWALSource {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
 /// Cloud file system options controlling how RocksDB interacts with cloud storage.
 ///
 /// Persistent cache path and size are stored as Rust fields and passed to the

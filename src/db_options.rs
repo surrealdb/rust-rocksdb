@@ -2452,6 +2452,18 @@ impl Options {
         }
     }
 
+    /// Sets the WAL sources for read replica catch-up.
+    ///
+    /// Combine [`ReadReplicaWALSource`] flags with bitwise OR.
+    /// Only takes effect when the database is opened with
+    /// [`DB::open_as_read_replica`].
+    #[cfg(feature = "cloud")]
+    pub fn set_read_replica_wal_sources(&mut self, sources: crate::cloud::ReadReplicaWALSource) {
+        unsafe {
+            ffi::rocksdb_options_set_read_replica_wal_sources(self.inner, sources.bits());
+        }
+    }
+
     /// Sets the target file size for compaction.
     /// target_file_size_base is per-file size for level-1.
     /// Target file size for level L can be calculated by

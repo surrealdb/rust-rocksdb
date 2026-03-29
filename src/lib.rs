@@ -156,7 +156,7 @@ mod cloud;
 pub use crate::cloud::{
     AwsAccessType, BranchInfo, CloudBucketOptions, CloudCheckpointOptions, CloudCredentials,
     CloudDB, CloudFileSystem, CloudFileSystemOptions, CloudOptimisticTransactionDB,
-    CloudTransactionDB, CreateBranchOptions, ForkPoint, WalKafkaSyncMode,
+    CloudTransactionDB, CreateBranchOptions, ForkPoint, ReadReplicaWALSource, WalKafkaSyncMode,
 };
 
 #[cfg(feature = "encryption")]

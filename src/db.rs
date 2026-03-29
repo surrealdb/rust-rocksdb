@@ -355,9 +355,19 @@ unsafe impl<T: ThreadMode, I: DBInner> Sync for DBCommon<T, I> {}
 // Specifies whether open DB for read only.
 enum AccessType<'a> {
     ReadWrite,
-    ReadOnly { error_if_log_file_exist: bool },
-    Secondary { secondary_path: &'a Path },
-    WithTTL { ttl: Duration },
+    ReadOnly {
+        error_if_log_file_exist: bool,
+    },
+    Secondary {
+        secondary_path: &'a Path,
+    },
+    WithTTL {
+        ttl: Duration,
+    },
+    #[cfg(feature = "cloud")]
+    ReadReplica {
+        local_replica_path: &'a Path,
+    },
 }
 
 /// Methods of `DBWithThreadMode`.
@@ -390,6 +400,65 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         secondary_path: P,
     ) -> Result<Self, Error> {
         Self::open_cf_as_secondary(opts, primary_path, secondary_path, None::<&str>)
+    }
+
+    /// Opens the database as a cloud-aware read replica.
+    ///
+    /// The replica continuously re-syncs from MANIFEST/CLOUDMANIFEST and
+    /// replays WAL from local storage, cloud object storage, or Kafka without
+    /// needing to close and reopen. Requires `Options` backed by a
+    /// `CloudFileSystem`.
+    #[cfg(feature = "cloud")]
+    pub fn open_as_read_replica<P: AsRef<Path>>(
+        opts: &Options,
+        cloud_db_path: P,
+        local_replica_path: P,
+    ) -> Result<Self, Error> {
+        Self::open_cf_as_read_replica(opts, cloud_db_path, local_replica_path, None::<&str>)
+    }
+
+    /// Opens the database as a cloud-aware read replica with the given column
+    /// family names.
+    #[cfg(feature = "cloud")]
+    pub fn open_cf_as_read_replica<P, I, N>(
+        opts: &Options,
+        cloud_db_path: P,
+        local_replica_path: P,
+        cfs: I,
+    ) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+        I: IntoIterator<Item = N>,
+        N: AsRef<str>,
+    {
+        let cfs = cfs
+            .into_iter()
+            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+
+        Self::open_cf_descriptors_read_replica(opts, cloud_db_path, local_replica_path, cfs)
+    }
+
+    /// Opens the database as a cloud-aware read replica with the given column
+    /// family descriptors.
+    #[cfg(feature = "cloud")]
+    pub fn open_cf_descriptors_read_replica<P, I>(
+        opts: &Options,
+        cloud_db_path: P,
+        local_replica_path: P,
+        cfs: I,
+    ) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+        I: IntoIterator<Item = ColumnFamilyDescriptor>,
+    {
+        Self::open_cf_descriptors_internal(
+            opts,
+            cloud_db_path,
+            cfs,
+            &AccessType::ReadReplica {
+                local_replica_path: local_replica_path.as_ref(),
+            },
+        )
     }
 
     /// Opens the database with a Time to Live compaction filter.
@@ -745,6 +814,14 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                     cpath.as_ptr(),
                     ttl.as_secs() as c_int,
                 )),
+                #[cfg(feature = "cloud")]
+                AccessType::ReadReplica { local_replica_path } => {
+                    ffi_try!(ffi::rocksdb_open_as_read_replica(
+                        opts.inner,
+                        cpath.as_ptr(),
+                        to_cpath(local_replica_path)?.as_ptr(),
+                    ))
+                }
             }
         };
         Ok(db)
@@ -810,6 +887,18 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                         cfopts.as_ptr(),
                         cfhandles.as_mut_ptr(),
                         ttls.as_ptr(),
+                    ))
+                }
+                #[cfg(feature = "cloud")]
+                AccessType::ReadReplica { local_replica_path } => {
+                    ffi_try!(ffi::rocksdb_open_as_read_replica_column_families(
+                        opts.inner,
+                        cpath.as_ptr(),
+                        to_cpath(local_replica_path)?.as_ptr(),
+                        cfs_v.len() as c_int,
+                        cfnames.as_ptr(),
+                        cfopts.as_ptr(),
+                        cfhandles.as_mut_ptr(),
                     ))
                 }
             }
@@ -2329,6 +2418,20 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     pub fn try_catch_up_with_primary(&self) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_try_catch_up_with_primary(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Re-syncs a read replica with its leader by refreshing the CLOUDMANIFEST,
+    /// tailing the MANIFEST, and replaying WAL from all configured sources.
+    ///
+    /// This is the read-replica equivalent of `try_catch_up_with_primary` and
+    /// internally calls `TryCatchUpWithPrimary()` on the underlying
+    /// `DBImplReadReplica`.
+    #[cfg(feature = "cloud")]
+    pub fn try_catch_up_with_leader(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_read_replica_try_catch_up(self.inner.inner()));
         }
         Ok(())
     }
