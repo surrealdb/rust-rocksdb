@@ -679,12 +679,28 @@ automatically uploaded to S3 by the cloud file system. On the replica:
 4. The replica opens with `DB::OpenForReadOnly` under the hood, so all
    write operations return an error.
 
+### WAL recovery
+
+When the primary is configured with `background_wal_sync_to_cloud` or
+`kafka_wal_sync_mode` (or both), WAL files are shipped to S3 and/or
+Kafka. On open, the cloud file system automatically recovers WAL data
+from these sources before RocksDB replays it. This allows both the
+primary (after a crash) and replicas to see data that was written but
+not yet flushed to SSTs.
+
+To enable WAL recovery on a replica, set
+`background_wal_sync_to_cloud(true)` and/or the same Kafka WAL options
+as the primary. The replica's `CloudFileSystemOptions` must match the
+primary's WAL configuration so that recovery knows where to fetch WAL
+data from.
+
 ### Limitations
 
-- **Point-in-time snapshots.** Each open is a frozen snapshot of the
-  primary's state at the time of the last flush or compaction. The replica
-  does not see unflushed memtable data. To pick up new writes, close and
-  re-open.
+- **Point-in-time snapshots.** Without WAL recovery enabled, each open is
+  a frozen snapshot of the primary's state at the time of the last flush
+  or compaction. When WAL recovery is enabled (via S3 and/or Kafka), the
+  replica can also see unflushed writes that were shipped to cloud/Kafka
+  before the replica opened.
 - **No live tailing.** Unlike `DB::open_as_secondary` (which supports
   `try_catch_up_with_primary` for local-disk secondaries), the cloud
   read-only open does not support incremental catch-up. Each refresh
@@ -1536,6 +1552,31 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `None`      | `0`   | No Kafka WAL sync (default)                |
 | `PerAppend` | `1`   | Publish to Kafka on every `Append()`       |
 | `PerSync`   | `2`   | Publish to Kafka on every `Sync()`/`fsync` |
+
+#### Kafka WAL recovery on startup
+
+When `kafka_wal_sync_mode` is set to `PerAppend` or `PerSync`, WAL records
+are published to Kafka during normal operation. On startup (both read-write
+and read-only opens), the cloud file system automatically consumes all
+available records from the Kafka topic and writes them into the local DB
+directory before RocksDB's recovery runs. This ensures that unflushed data
+that was published to Kafka but not yet compacted into SST files is not
+lost after a restart.
+
+The Kafka topic name is derived as `<kafka_topic_prefix>.<dest_bucket_name>`.
+The consumer reads from the earliest available offset on every startup.
+RocksDB's `Recover()` deduplicates WAL entries by sequence number, so
+replaying records that are already covered by flushed SSTs is safe.
+
+**Important:** The Kafka topic retention must be configured to be long
+enough to cover the interval between the last flush/compaction and a
+potential crash. If Kafka purges messages before the data reaches SSTs,
+those writes will be lost.
+
+When `background_wal_sync_to_cloud` is also enabled, both S3 and Kafka
+recovery run during startup. S3 recovery downloads complete WAL files
+first, then Kafka recovery fills in any records that the periodic S3
+upload had not yet captured.
 
 #### Fallback buckets
 
