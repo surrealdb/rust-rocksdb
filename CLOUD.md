@@ -23,7 +23,11 @@ the full option reference.
   - [Basic replica pattern](#basic-replica-pattern)
   - [Replica with column families](#replica-with-column-families)
   - [How it works](#how-it-works)
-  - [Limitations](#limitations)
+- [Live read replicas](#live-read-replicas)
+  - [Opening a live replica](#opening-a-live-replica)
+  - [Incremental catch-up](#incremental-catch-up)
+  - [WAL source configuration](#wal-source-configuration)
+  - [Choosing a replica mode](#choosing-a-replica-mode)
 - [Cloud checkpoints](#cloud-checkpoints)
 - [Incremental backups](#incremental-backups)
   - [Basic usage](#basic-usage)
@@ -33,8 +37,12 @@ the full option reference.
   - [Combining backups with encryption](#combining-backups-with-encryption)
 - [Zero-copy branching](#zero-copy-branching)
   - [Fork points](#fork-points)
+  - [Creating a branch](#creating-a-branch)
+  - [Listing and detaching branches](#listing-and-detaching-branches)
   - [Fallback buckets](#fallback-buckets)
 - [Cross-region replication](#cross-region-replication)
+- [WAL delta upload](#wal-delta-upload)
+  - [Kafka WAL configuration](#kafka-wal-configuration)
 - [Bandwidth throttling](#bandwidth-throttling)
 - [Encryption at rest](#encryption-at-rest)
 - [SST file manager](#sst-file-manager)
@@ -694,20 +702,152 @@ as the primary. The replica's `CloudFileSystemOptions` must match the
 primary's WAL configuration so that recovery knows where to fetch WAL
 data from.
 
-### Limitations
+Read-only replicas produce point-in-time snapshots. Without WAL recovery
+enabled, each open is a frozen snapshot of the primary's state at the time
+of the last flush or compaction. When WAL recovery is enabled (via S3
+and/or Kafka), the replica can also see unflushed writes that were shipped
+to cloud/Kafka before the replica opened. Each refresh requires a full
+close/re-open cycle.
 
-- **Point-in-time snapshots.** Without WAL recovery enabled, each open is
-  a frozen snapshot of the primary's state at the time of the last flush
-  or compaction. When WAL recovery is enabled (via S3 and/or Kafka), the
-  replica can also see unflushed writes that were shipped to cloud/Kafka
-  before the replica opened.
-- **No live tailing.** Unlike `DB::open_as_secondary` (which supports
-  `try_catch_up_with_primary` for local-disk secondaries), the cloud
-  read-only open does not support incremental catch-up. Each refresh
-  requires a full close/re-open cycle.
-- **Single primary writer.** Only one database instance may write to a
-  given cloud bucket and object path at a time. Multiple read-only
-  replicas may read from the same path concurrently.
+For live incremental catch-up without closing the database, see
+[Live read replicas](#live-read-replicas) below.
+
+---
+
+## Live read replicas
+
+A live read replica (`DB::open_as_read_replica`) continuously re-syncs
+from the leader's CLOUDMANIFEST, MANIFEST, and WAL without closing and
+reopening the database. Unlike the read-only replica pattern above, it
+supports `try_catch_up_with_leader()` for incremental catch-up from
+cloud storage and/or Kafka.
+
+### Opening a live replica
+
+`DB::open_as_read_replica` takes the cloud DB path (pointing at the
+leader's cloud storage) and a local replica path for caching SSTs, WAL
+files, and logs.
+
+```rust
+use rocksdb::{
+    Options, DB, CloudCredentials, AwsAccessType,
+    CloudBucketOptions, CloudFileSystemOptions,
+    CloudFileSystem, ReadReplicaWALSource,
+};
+
+fn open_live_replica() -> Result<DB, rocksdb::Error> {
+    let mut creds = CloudCredentials::default();
+    creds.set_type(AwsAccessType::Environment);
+
+    let mut bucket = CloudBucketOptions::default();
+    bucket.set_bucket_name("my-rocksdb-bucket");
+    bucket.set_region("us-east-1");
+    bucket.set_object_path("db/production");
+
+    let mut cloud_opts = CloudFileSystemOptions::default();
+    cloud_opts.set_credentials(&creds);
+    cloud_opts.set_dest_bucket(&bucket);
+    cloud_opts.set_resync_on_open(true);
+    cloud_opts.set_keep_local_sst_files(true);
+    cloud_opts.set_run_purger(false);
+    cloud_opts.set_skip_dbid_verification(true);
+
+    let cloud_fs = CloudFileSystem::new(&cloud_opts)?;
+
+    let mut opts = Options::default();
+    opts.create_if_missing(false);
+    opts.set_env(&cloud_fs.create_cloud_env()?);
+
+    // Configure which WAL sources the replica uses for catch-up
+    opts.set_read_replica_wal_sources(
+        ReadReplicaWALSource::LOCAL | ReadReplicaWALSource::CLOUD,
+    );
+
+    DB::open_as_read_replica(
+        &opts,
+        "/tmp/cloud_db",        // cloud DB path (leader's local path)
+        "/tmp/replica_local",   // local replica cache path
+    )
+}
+```
+
+The column family variant is also available:
+
+```rust
+let db = DB::open_cf_as_read_replica(
+    &opts,
+    "/tmp/cloud_db",
+    "/tmp/replica_local",
+    ["cf1", "cf2"],
+)?;
+```
+
+### Incremental catch-up
+
+Call `try_catch_up_with_leader()` to pull the latest changes without
+closing the database. This re-fetches the CLOUDMANIFEST, tails the
+MANIFEST, downloads new WAL from cloud/Kafka, replays it, and installs
+new SuperVersions.
+
+```rust
+use std::time::Duration;
+
+fn replica_loop(db: &DB) -> Result<(), rocksdb::Error> {
+    loop {
+        db.try_catch_up_with_leader()?;
+
+        if let Some(val) = db.get(b"some_key")? {
+            println!("value: {:?}", val);
+        }
+
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+```
+
+The background refresh thread can also be configured via the standard
+`follower_refresh_catchup_period_ms` and retry options on `DBOptions`
+for automatic periodic catch-up.
+
+### WAL source configuration
+
+`ReadReplicaWALSource` is a bitflag that controls which WAL sources the
+replica consumes during `try_catch_up_with_leader()`. Combine flags with
+bitwise OR:
+
+| Flag                          | Value | Description                              |
+|-------------------------------|-------|------------------------------------------|
+| `ReadReplicaWALSource::LOCAL` | `0x1` | Scan the local WAL directory (default)   |
+| `ReadReplicaWALSource::CLOUD` | `0x2` | Download WAL from cloud storage (S3/GCS) |
+| `ReadReplicaWALSource::KAFKA` | `0x4` | Consume WAL records from Kafka           |
+
+```rust
+use rocksdb::{Options, ReadReplicaWALSource};
+
+let mut opts = Options::default();
+
+// Catch up from all three sources
+opts.set_read_replica_wal_sources(
+    ReadReplicaWALSource::LOCAL
+        | ReadReplicaWALSource::CLOUD
+        | ReadReplicaWALSource::KAFKA,
+);
+```
+
+When using `CLOUD` or `KAFKA` sources, the replica's
+`CloudFileSystemOptions` must have the corresponding WAL sync options
+configured to match the leader (e.g. `background_wal_sync_to_cloud`,
+`kafka_bootstrap_servers`, `kafka_topic_prefix`).
+
+### Choosing a replica mode
+
+| Feature                      | Read-only replica             | Live read replica                         |
+|------------------------------|-------------------------------|-------------------------------------------|
+| API                          | `CloudDB::open_read_only`     | `DB::open_as_read_replica`                |
+| Catch-up                     | Close and re-open             | `try_catch_up_with_leader()` (in-place)   |
+| WAL sources                  | S3 / Kafka on open only       | Local + S3 + Kafka (configurable, continuous) |
+| Background refresh           | No                            | Yes (configurable interval)               |
+| Single primary writer        | Yes                           | Yes                                       |
 
 ---
 
@@ -1059,6 +1199,92 @@ The `ForkPoint` struct contains:
 | `file_number`             | `u64`    | Next file number at the fork point   |
 | `cloud_manifest_cookie`   | `String` | CLOUDMANIFEST cookie for consistency |
 
+### Creating a branch
+
+`create_branch()` creates a zero-copy branch at the given destination
+bucket. The branch shares the parent's SST files via fallback buckets —
+no data is copied. `CreateBranchOptions` controls whether the memtable
+is flushed before branching and whether WAL files are included.
+
+```rust
+use rocksdb::{
+    CloudDB, CloudBucketOptions, CloudFileSystem,
+    CloudFileSystemOptions, CreateBranchOptions, Options,
+};
+
+let cloud_fs = CloudFileSystem::new(&CloudFileSystemOptions::default())?;
+let mut opts = Options::default();
+opts.create_if_missing(true);
+opts.set_env(&cloud_fs.create_cloud_env()?);
+
+let db = CloudDB::open(&opts, &cloud_fs, "/tmp/parent_db")?;
+
+db.put(b"key", b"value")?;
+
+// Create a branch at a different object path
+let mut branch_dest = CloudBucketOptions::default();
+branch_dest.set_bucket_name("my-bucket");
+branch_dest.set_region("us-east-1");
+branch_dest.set_object_path("branches/feature-x");
+
+let branch_opts = CreateBranchOptions {
+    flush_memtable: true,   // flush before branching
+    include_wal: false,     // WAL not needed when flushing
+};
+
+let branch_info = db.create_branch(&branch_dest, &branch_opts)?;
+println!("Branch DBID: {}", branch_info.dbid);
+println!("Branch path: {}", branch_info.object_path);
+```
+
+The `CreateBranchOptions` defaults are `flush_memtable: false` and
+`include_wal: true`, which copies WAL files from S3 so the branch
+includes unflushed data without flushing.
+
+To open the child branch, configure the parent's bucket as a fallback
+so the child can read the parent's SST files:
+
+```rust
+let mut child_cloud_opts = CloudFileSystemOptions::default();
+// ... configure credentials ...
+
+let mut child_dest = CloudBucketOptions::default();
+child_dest.set_bucket_name("my-bucket");
+child_dest.set_object_path("branches/feature-x");
+child_cloud_opts.set_dest_bucket(&child_dest);
+
+// Parent's path as a fallback for shared SSTs
+let mut parent_bucket = CloudBucketOptions::default();
+parent_bucket.set_bucket_name("my-bucket");
+parent_bucket.set_object_path("db/production");
+child_cloud_opts.add_fallback_bucket(&parent_bucket);
+
+let child_fs = CloudFileSystem::new(&child_cloud_opts)?;
+let mut child_opts = Options::default();
+child_opts.set_env(&child_fs.create_cloud_env()?);
+
+let child_db = CloudDB::open(&child_opts, &child_fs, "/tmp/child_db")?;
+```
+
+### Listing and detaching branches
+
+`list_branches()` returns all child branches of the current database.
+`detach_branch()` copies all referenced parent SSTs into the branch's
+own path, making it fully independent.
+
+```rust
+// List children
+let branches = db.list_branches()?;
+for branch in &branches {
+    println!("DBID: {}, path: {}", branch.dbid, branch.object_path);
+}
+
+// Detach a child branch (run on the child DB)
+// This copies parent SSTs into the child's path so fallback buckets
+// are no longer needed.
+child_db.detach_branch()?;
+```
+
 ### Fallback buckets
 
 Fallback buckets enable a child branch to read SST files from its parent's
@@ -1157,6 +1383,70 @@ fn main() -> Result<(), rocksdb::Error> {
 
 Use `clear_replication_buckets()` to remove all configured replication targets
 (for example, before re-configuring them on a subsequent open).
+
+---
+
+## WAL delta upload
+
+By default, `background_wal_sync_to_cloud` re-uploads the entire WAL file
+on every sync interval. When `use_wal_delta_upload` is enabled, only new
+bytes since the last upload are written as separate `.delta.<offset>`
+objects in cloud storage. This reduces upload bandwidth and latency for
+large WAL files.
+
+Recovery automatically detects delta chunks, groups them by base WAL file
+name, sorts by offset, and concatenates them into complete local WAL files
+before replay.
+
+```rust
+use rocksdb::CloudFileSystemOptions;
+
+let mut cloud_opts = CloudFileSystemOptions::default();
+
+// Enable background WAL upload to cloud
+cloud_opts.set_background_wal_sync_to_cloud(true);
+cloud_opts.set_background_wal_sync_interval_ms(2_000); // every 2 seconds
+
+// Upload only new bytes as deltas instead of full re-upload
+cloud_opts.set_use_wal_delta_upload(true);
+```
+
+Delta upload works alongside Kafka WAL sync. When both are enabled, S3
+recovery downloads delta chunks first, then Kafka recovery fills in any
+records that the periodic S3 upload had not yet captured.
+
+### Kafka WAL configuration
+
+When `kafka_wal_sync_mode` is set to `PerAppend` or `PerSync`, WAL
+records are published to Kafka during normal operation. On startup, the
+cloud file system consumes all available records from the Kafka topic
+and writes them into the local DB directory before recovery runs.
+
+```rust
+use rocksdb::{CloudFileSystemOptions, WalKafkaSyncMode};
+
+let mut cloud_opts = CloudFileSystemOptions::default();
+
+// Kafka connection
+cloud_opts.set_kafka_bootstrap_servers("broker1:9092,broker2:9092");
+cloud_opts.set_kafka_topic_prefix("rocksdb-wal");
+
+// Publish WAL to Kafka on every fsync
+cloud_opts.set_kafka_wal_sync_mode(WalKafkaSyncMode::PerSync);
+
+// Also upload WAL to S3 in the background for belt-and-suspenders
+cloud_opts.set_background_wal_sync_to_cloud(true);
+cloud_opts.set_use_wal_delta_upload(true);
+```
+
+The Kafka topic name is derived as `<kafka_topic_prefix>.<dest_bucket_name>`.
+The consumer reads from the earliest available offset on every startup.
+RocksDB deduplicates WAL entries by sequence number, so replaying records
+that are already covered by flushed SSTs is safe.
+
+**Important:** The Kafka topic retention must be configured to cover the
+interval between the last flush/compaction and a potential crash. If Kafka
+purges messages before the data reaches SSTs, those writes will be lost.
 
 ---
 
@@ -1554,31 +1844,6 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `PerAppend` | `1`   | Publish to Kafka on every `Append()`       |
 | `PerSync`   | `2`   | Publish to Kafka on every `Sync()`/`fsync` |
 
-#### Kafka WAL recovery on startup
-
-When `kafka_wal_sync_mode` is set to `PerAppend` or `PerSync`, WAL records
-are published to Kafka during normal operation. On startup (both read-write
-and read-only opens), the cloud file system automatically consumes all
-available records from the Kafka topic and writes them into the local DB
-directory before RocksDB's recovery runs. This ensures that unflushed data
-that was published to Kafka but not yet compacted into SST files is not
-lost after a restart.
-
-The Kafka topic name is derived as `<kafka_topic_prefix>.<dest_bucket_name>`.
-The consumer reads from the earliest available offset on every startup.
-RocksDB's `Recover()` deduplicates WAL entries by sequence number, so
-replaying records that are already covered by flushed SSTs is safe.
-
-**Important:** The Kafka topic retention must be configured to be long
-enough to cover the interval between the last flush/compaction and a
-potential crash. If Kafka purges messages before the data reaches SSTs,
-those writes will be lost.
-
-When `background_wal_sync_to_cloud` is also enabled, both S3 and Kafka
-recovery run during startup. S3 recovery downloads complete WAL files
-first, then Kafka recovery fills in any records that the periodic S3
-upload had not yet captured.
-
 #### Fallback buckets
 
 | Method                  | Description                                                  |
@@ -1601,6 +1866,37 @@ upload had not yet captured.
 |-------------------------------------|-----------------------------------------------|
 | `set_cloud_upload_rate_limiter`     | Throttle upload bandwidth (bytes/sec, refill period, fairness) |
 | `set_cloud_download_rate_limiter`   | Throttle download bandwidth (bytes/sec, refill period, fairness) |
+
+### Options (cloud-specific)
+
+| Method                                | Type                    | Description                                        |
+|---------------------------------------|-------------------------|----------------------------------------------------|
+| `set_read_replica_wal_sources`        | `ReadReplicaWALSource`  | WAL sources for read replica catch-up (bitflags)   |
+| `set_initial_table_load_limit`        | `i32`                   | SST files to preload during open (0 = all, default 16) |
+
+### CreateBranchOptions
+
+| Field              | Type   | Default | Description                                            |
+|--------------------|--------|---------|--------------------------------------------------------|
+| `flush_memtable`   | `bool` | `false` | Flush memtable to SSTs before branching                |
+| `include_wal`      | `bool` | `true`  | Copy WAL files from S3 to include unflushed data       |
+
+### BranchInfo
+
+| Field         | Type     | Description                             |
+|---------------|----------|-----------------------------------------|
+| `dbid`        | `String` | The DBID of the branch                  |
+| `object_path` | `String` | The S3/GCS object path of the branch    |
+
+### ReadReplicaWALSource
+
+| Flag    | Value | Description                              |
+|---------|-------|------------------------------------------|
+| `LOCAL` | `0x1` | Scan local WAL directory                 |
+| `CLOUD` | `0x2` | Download WAL from cloud storage (S3/GCS) |
+| `KAFKA` | `0x4` | Consume WAL records from Kafka           |
+
+Combine with bitwise OR: `ReadReplicaWALSource::LOCAL | ReadReplicaWALSource::CLOUD`
 
 ### CloudBucketOptions
 
