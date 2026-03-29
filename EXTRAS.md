@@ -103,6 +103,14 @@ Bindings for WAL cloud sync configuration on `CloudFileSystemOptions`:
   `kafka_bootstrap_servers`, `kafka_topic_prefix`,
   `background_wal_sync_to_cloud`, and `background_wal_sync_interval_ms`
 
+## Incremental WAL delta upload option
+
+`set_use_wal_delta_upload` / `get_use_wal_delta_upload` on
+`CloudFileSystemOptions`. When enabled alongside
+`background_wal_sync_to_cloud`, only new bytes since the last upload are
+written as separate delta objects instead of re-uploading the entire WAL
+file. Recovery reassembles deltas in order.
+
 ## Fork point snapshot API bindings
 
 `ForkPoint` struct and `capture_fork_point()` method on `CloudDB`,

@@ -197,6 +197,11 @@ fn test_cloud_fs_options_wal_booleans() {
     assert!(opts.get_background_wal_sync_to_cloud());
     opts.set_background_wal_sync_to_cloud(false);
     assert!(!opts.get_background_wal_sync_to_cloud());
+
+    opts.set_use_wal_delta_upload(true);
+    assert!(opts.get_use_wal_delta_upload());
+    opts.set_use_wal_delta_upload(false);
+    assert!(!opts.get_use_wal_delta_upload());
 }
 
 #[test]

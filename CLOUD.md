@@ -1544,6 +1544,7 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `set_background_wal_sync_to_cloud` / `get_background_wal_sync_to_cloud` | `bool`             | `false`       | Periodically upload WAL files to cloud storage in the background     |
 | `set_background_wal_sync_interval_ms` / `get_background_wal_sync_interval_ms` | `u64`        | `5000`        | Interval between background WAL uploads (milliseconds)               |
 | `set_kafka_wal_sync_mode` / `get_kafka_wal_sync_mode`                    | `WalKafkaSyncMode` | `None`        | When to publish WAL records to Kafka (`None`, `PerAppend`, `PerSync`) |
+| `set_use_wal_delta_upload` / `get_use_wal_delta_upload`                  | `bool`             | `false`       | Upload only new WAL bytes as delta objects instead of full re-upload  |
 
 ### WalKafkaSyncMode
 
