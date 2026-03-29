@@ -1517,6 +1517,25 @@ db.resume()?; // resume background compaction, flushes, etc.
 | `set_encryption_key_id` / `get_encryption_key_id`    | KMS key ID for server-side encryption             |
 | `set_cookie_on_open` / `get_cookie_on_open`          | CLOUDMANIFEST cookie to use when opening           |
 | `set_new_cookie_on_open` / `get_new_cookie_on_open`  | New cookie to roll to on open                      |
+| `set_kafka_bootstrap_servers` / `get_kafka_bootstrap_servers` | Kafka bootstrap servers (e.g. `"broker1:9092,broker2:9092"`) |
+| `set_kafka_topic_prefix` / `get_kafka_topic_prefix`  | Prefix for the Kafka topic name (full topic: `<prefix>.<dest_bucket>`) |
+
+#### WAL sync options
+
+| Setter / Getter                                                          | Type               | Default       | Description                                                          |
+|--------------------------------------------------------------------------|--------------------|---------------|----------------------------------------------------------------------|
+| `set_keep_local_log_files` / `get_keep_local_log_files`                  | `bool`             | `true`        | Keep WAL files on the local filesystem                               |
+| `set_background_wal_sync_to_cloud` / `get_background_wal_sync_to_cloud` | `bool`             | `false`       | Periodically upload WAL files to cloud storage in the background     |
+| `set_background_wal_sync_interval_ms` / `get_background_wal_sync_interval_ms` | `u64`        | `5000`        | Interval between background WAL uploads (milliseconds)               |
+| `set_kafka_wal_sync_mode` / `get_kafka_wal_sync_mode`                    | `WalKafkaSyncMode` | `None`        | When to publish WAL records to Kafka (`None`, `PerAppend`, `PerSync`) |
+
+### WalKafkaSyncMode
+
+| Variant     | Value | Description                                |
+|-------------|-------|--------------------------------------------|
+| `None`      | `0`   | No Kafka WAL sync (default)                |
+| `PerAppend` | `1`   | Publish to Kafka on every `Append()`       |
+| `PerSync`   | `2`   | Publish to Kafka on every `Sync()`/`fsync` |
 
 #### Fallback buckets
 

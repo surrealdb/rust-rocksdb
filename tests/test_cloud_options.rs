@@ -2,7 +2,7 @@
 
 use rocksdb::{
     AwsAccessType, CloudBucketOptions, CloudCheckpointOptions, CloudCredentials,
-    CloudFileSystemOptions,
+    CloudFileSystemOptions, WalKafkaSyncMode,
 };
 
 #[test]
@@ -182,4 +182,59 @@ fn test_cloud_fs_options_credentials() {
     let creds = CloudCredentials::default();
     opts.set_credentials(&creds);
     drop(opts);
+}
+
+#[test]
+fn test_cloud_fs_options_wal_booleans() {
+    let mut opts = CloudFileSystemOptions::default();
+
+    opts.set_keep_local_log_files(false);
+    assert!(!opts.get_keep_local_log_files());
+    opts.set_keep_local_log_files(true);
+    assert!(opts.get_keep_local_log_files());
+
+    opts.set_background_wal_sync_to_cloud(true);
+    assert!(opts.get_background_wal_sync_to_cloud());
+    opts.set_background_wal_sync_to_cloud(false);
+    assert!(!opts.get_background_wal_sync_to_cloud());
+}
+
+#[test]
+fn test_cloud_fs_options_wal_kafka_mode() {
+    let mut opts = CloudFileSystemOptions::default();
+    assert_eq!(opts.get_kafka_wal_sync_mode(), WalKafkaSyncMode::None);
+
+    opts.set_kafka_wal_sync_mode(WalKafkaSyncMode::PerAppend);
+    assert_eq!(opts.get_kafka_wal_sync_mode(), WalKafkaSyncMode::PerAppend);
+
+    opts.set_kafka_wal_sync_mode(WalKafkaSyncMode::PerSync);
+    assert_eq!(opts.get_kafka_wal_sync_mode(), WalKafkaSyncMode::PerSync);
+
+    opts.set_kafka_wal_sync_mode(WalKafkaSyncMode::None);
+    assert_eq!(opts.get_kafka_wal_sync_mode(), WalKafkaSyncMode::None);
+}
+
+#[test]
+fn test_cloud_fs_options_wal_strings() {
+    let mut opts = CloudFileSystemOptions::default();
+
+    opts.set_kafka_bootstrap_servers("broker1:9092,broker2:9092");
+    assert_eq!(
+        opts.get_kafka_bootstrap_servers(),
+        "broker1:9092,broker2:9092"
+    );
+
+    opts.set_kafka_topic_prefix("my-wal-prefix");
+    assert_eq!(opts.get_kafka_topic_prefix(), "my-wal-prefix");
+}
+
+#[test]
+fn test_cloud_fs_options_wal_interval() {
+    let mut opts = CloudFileSystemOptions::default();
+
+    opts.set_background_wal_sync_interval_ms(2000);
+    assert_eq!(opts.get_background_wal_sync_interval_ms(), 2000);
+
+    opts.set_background_wal_sync_interval_ms(10000);
+    assert_eq!(opts.get_background_wal_sync_interval_ms(), 10000);
 }

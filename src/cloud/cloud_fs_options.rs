@@ -6,6 +6,30 @@ use crate::{
     ffi_util::CStrLike,
 };
 
+/// Controls when WAL records are published to Kafka.
+///
+/// Requires `USE_KAFKA` at build time for `PerAppend` and `PerSync` modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WalKafkaSyncMode {
+    /// No Kafka WAL sync (default).
+    None = 0,
+    /// Publish to Kafka on every `Append()`.
+    PerAppend = 1,
+    /// Publish to Kafka on every `Sync()`/`fsync`.
+    PerSync = 2,
+}
+
+impl WalKafkaSyncMode {
+    fn from_u8(val: u8) -> Self {
+        match val {
+            1 => Self::PerAppend,
+            2 => Self::PerSync,
+            _ => Self::None,
+        }
+    }
+}
+
 /// Cloud file system options controlling how RocksDB interacts with cloud storage.
 ///
 /// Persistent cache path and size are stored as Rust fields and passed to the
@@ -295,6 +319,92 @@ impl CloudFileSystemOptions {
             let ptr = ffi::rocksdb_cloud_fs_options_get_new_cookie_on_open(self.inner);
             String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
         }
+    }
+
+    // WAL options
+
+    // keep_local_log_files: if true, WAL (log) files are written to the local
+    // filesystem. When false and a Kafka or cloud WAL sync mode is enabled,
+    // WAL files are not stored locally.
+    cloud_fs_bool_option!(
+        set_keep_local_log_files,
+        get_keep_local_log_files,
+        rocksdb_cloud_fs_options_set_keep_local_log_files,
+        rocksdb_cloud_fs_options_get_keep_local_log_files
+    );
+
+    // background_wal_sync_to_cloud: if true, WAL files are periodically
+    // uploaded to cloud object storage (S3/GCS) in the background via
+    // CloudScheduler.
+    cloud_fs_bool_option!(
+        set_background_wal_sync_to_cloud,
+        get_background_wal_sync_to_cloud,
+        rocksdb_cloud_fs_options_set_background_wal_sync_to_cloud,
+        rocksdb_cloud_fs_options_get_background_wal_sync_to_cloud
+    );
+
+    /// Set the Kafka WAL sync mode controlling when WAL records are published
+    /// to Kafka. Requires `USE_KAFKA` at build time for non-`None` modes.
+    pub fn set_kafka_wal_sync_mode(&mut self, mode: WalKafkaSyncMode) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_kafka_wal_sync_mode(
+                self.inner,
+                mode as libc::c_uchar,
+            );
+        }
+    }
+
+    /// Returns the configured Kafka WAL sync mode.
+    pub fn get_kafka_wal_sync_mode(&self) -> WalKafkaSyncMode {
+        let val = unsafe { ffi::rocksdb_cloud_fs_options_get_kafka_wal_sync_mode(self.inner) };
+        WalKafkaSyncMode::from_u8(val)
+    }
+
+    /// Set the Kafka bootstrap servers (e.g. `"broker1:9092,broker2:9092"`).
+    /// Required when `kafka_wal_sync_mode` is not `None`.
+    pub fn set_kafka_bootstrap_servers(&mut self, val: impl CStrLike) {
+        let val = val.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_kafka_bootstrap_servers(self.inner, val.as_ptr());
+        }
+    }
+
+    /// Returns the configured Kafka bootstrap servers.
+    pub fn get_kafka_bootstrap_servers(&self) -> String {
+        unsafe {
+            let ptr = ffi::rocksdb_cloud_fs_options_get_kafka_bootstrap_servers(self.inner);
+            String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
+        }
+    }
+
+    /// Set the prefix for the Kafka topic name. The full topic is
+    /// `"<prefix>.<dest_bucket_name>"`.
+    pub fn set_kafka_topic_prefix(&mut self, val: impl CStrLike) {
+        let val = val.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_kafka_topic_prefix(self.inner, val.as_ptr());
+        }
+    }
+
+    /// Returns the configured Kafka topic prefix.
+    pub fn get_kafka_topic_prefix(&self) -> String {
+        unsafe {
+            let ptr = ffi::rocksdb_cloud_fs_options_get_kafka_topic_prefix(self.inner);
+            String::from_utf8_lossy(CStr::from_ptr(ptr).to_bytes()).into_owned()
+        }
+    }
+
+    /// Set the interval in milliseconds between background WAL uploads when
+    /// `background_wal_sync_to_cloud` is enabled.
+    pub fn set_background_wal_sync_interval_ms(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_background_wal_sync_interval_ms(self.inner, val);
+        }
+    }
+
+    /// Returns the configured background WAL sync interval in milliseconds.
+    pub fn get_background_wal_sync_interval_ms(&self) -> u64 {
+        unsafe { ffi::rocksdb_cloud_fs_options_get_background_wal_sync_interval_ms(self.inner) }
     }
 
     // Fallback bucket options
