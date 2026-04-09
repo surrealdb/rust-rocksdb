@@ -309,6 +309,10 @@ impl Drop for DBWithThreadModeInner {
     }
 }
 
+/// The return type for get operations that also return a matched timestamp.
+/// The tuple contains `(Option<value>, Option<matched_timestamp>)`.
+pub type ValueWithTs = Result<(Option<Vec<u8>>, Option<Vec<u8>>), Error>;
+
 /// A type alias to RocksDB database.
 ///
 /// See crate level documentation for a simple usage example.
@@ -1170,13 +1174,12 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Return the bytes associated with a key value and the given column family, along with the
     /// matched timestamp via `rocksdb_get_cf_with_ts`. Returns a tuple of
     /// `(Option<value>, Option<matched_timestamp>)`.
-    #[allow(clippy::type_complexity)]
     pub fn get_cf_with_ts_opt<K: AsRef<[u8]>>(
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>), Error> {
+    ) -> ValueWithTs {
         if readopts.inner.is_null() {
             return Err(Error::new(
                 "Unable to create RocksDB read options. This is a fairly trivial call, and its \
