@@ -301,3 +301,64 @@ fn test_comparator_with_column_family_with_ts() {
 
     let _ = DB::destroy(&Options::default(), path);
 }
+
+#[test]
+fn test_get_cf_with_ts_opt() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_get_cf_with_ts_opt")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_missing_column_families(true);
+        db_opts.create_if_missing(true);
+
+        let mut cf_opts = Options::default();
+        cf_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let cfs = vec![("cf", cf_opts)];
+        let db = DB::open_cf_with_opts(&db_opts, path, cfs).unwrap();
+        let cf = db.cf_handle("cf").unwrap();
+
+        let key = b"hello";
+        let val1 = b"world0";
+        let val2 = b"world1";
+
+        let ts1 = U64Timestamp::new(1);
+        let ts2 = U64Timestamp::new(2);
+
+        // Write two versions
+        db.put_cf_with_ts(&cf, key, ts1, val1).unwrap();
+        db.put_cf_with_ts(&cf, key, ts2, val2).unwrap();
+
+        // Read at ts2 — should get val2 with matched timestamp ts2
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts2);
+        let (value, matched_ts) = db.get_cf_with_ts_opt(&cf, key, &opts).unwrap();
+        assert_eq!(value.unwrap().as_slice(), val2);
+        assert_eq!(U64Timestamp::from(matched_ts.unwrap().as_slice()), ts2);
+
+        // Read at ts1 — should get val1 with matched timestamp ts1
+        opts.set_timestamp(ts1);
+        let (value, matched_ts) = db.get_cf_with_ts_opt(&cf, key, &opts).unwrap();
+        assert_eq!(value.unwrap().as_slice(), val1);
+        assert_eq!(U64Timestamp::from(matched_ts.unwrap().as_slice()), ts1);
+
+        // Read a non-existent key — should get (None, None)
+        opts.set_timestamp(ts2);
+        let (value, matched_ts) = db.get_cf_with_ts_opt(&cf, b"missing", &opts).unwrap();
+        assert!(value.is_none());
+        assert!(matched_ts.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
