@@ -1081,6 +1081,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Return the bytes associated with a key value and the given column family, along with the
     /// matched timestamp via `rocksdb_get_cf_with_ts`. Returns a tuple of
     /// `(Option<value>, Option<matched_timestamp>)`.
+    #[allow(clippy::type_complexity)]
     pub fn get_cf_with_ts_opt<K: AsRef<[u8]>>(
         &self,
         cf: &impl AsColumnFamilyRef,
