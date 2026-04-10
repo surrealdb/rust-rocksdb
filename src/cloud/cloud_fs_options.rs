@@ -450,10 +450,10 @@ impl CloudFileSystemOptions {
         unsafe { ffi::rocksdb_cloud_fs_options_get_background_wal_sync_interval_ms(self.inner) }
     }
 
-    /// When true and `background_wal_sync_to_cloud` is enabled, only new
-    /// bytes since the last upload are written as separate delta objects
-    /// rather than re-uploading the entire WAL file. Recovery reassembles
-    /// deltas in order.
+    // When true and `background_wal_sync_to_cloud` is enabled, only new
+    // bytes since the last upload are written as separate delta objects
+    // rather than re-uploading the entire WAL file. Recovery reassembles
+    // deltas in order.
     cloud_fs_bool_option!(
         set_use_wal_delta_upload,
         get_use_wal_delta_upload,

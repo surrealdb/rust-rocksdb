@@ -8,7 +8,8 @@ use crate::{
     db::{DBCommon, DBInner},
     ffi,
     ffi_util::to_cpath,
-    ColumnFamilyDescriptor, Error, FlushOptions, Options, ThreadMode, DEFAULT_COLUMN_FAMILY_NAME,
+    ColumnFamilyDescriptor, Error, Options, ThreadMode, WriteBatch, WriteOptions,
+    DEFAULT_COLUMN_FAMILY_NAME,
 };
 
 /// Options for creating a zero-copy branch.
@@ -76,15 +77,8 @@ impl Drop for CloudDBInner {
     }
 }
 
-impl CloudDBInner {
-    fn flush(&self) -> Result<(), Error> {
-        let opts = FlushOptions::default();
-        unsafe {
-            ffi_try!(ffi::rocksdb_flush(self.base, opts.inner));
-        }
-        Ok(())
-    }
-}
+// Note: flush() is provided by DBCommon via the DBInner trait — no need
+// to duplicate it here.
 
 impl<T: ThreadMode> CloudDB<T> {
     /// Opens a cloud database.
@@ -269,10 +263,28 @@ impl<T: ThreadMode> CloudDB<T> {
         ))
     }
 
-    /// Flushes all memtables to ensure data is persisted to cloud storage.
-    /// Note: The database handle is released when this CloudDB is dropped.
-    pub fn flush(&self) -> Result<(), Error> {
-        self.inner.flush()
+    /// Writes a batch of changes to the database with the given write options.
+    pub fn write_opt(&self, batch: WriteBatch, writeopts: &WriteOptions) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_write(
+                self.inner.inner(),
+                writeopts.inner,
+                batch.inner
+            ));
+        }
+        Ok(())
+    }
+
+    /// Writes a batch of changes to the database with default write options.
+    pub fn write(&self, batch: WriteBatch) -> Result<(), Error> {
+        self.write_opt(batch, &WriteOptions::default())
+    }
+
+    /// Writes a batch of changes with WAL disabled.
+    pub fn write_without_wal(&self, batch: WriteBatch) -> Result<(), Error> {
+        let mut wo = WriteOptions::new();
+        wo.disable_wal(true);
+        self.write_opt(batch, &wo)
     }
 
     /// Create a savepoint (copy local files to cloud).

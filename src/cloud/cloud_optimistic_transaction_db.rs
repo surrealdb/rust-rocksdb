@@ -51,15 +51,7 @@ impl Drop for CloudOptimisticTransactionDBInner {
     }
 }
 
-impl CloudOptimisticTransactionDBInner {
-    fn flush(&self) -> Result<(), Error> {
-        let opts = crate::FlushOptions::default();
-        unsafe {
-            ffi_try!(ffi::rocksdb_flush(self.base, opts.inner));
-        }
-        Ok(())
-    }
-}
+// Note: flush() is provided by DBCommon via the DBInner trait.
 
 impl<T: ThreadMode> CloudOptimisticTransactionDB<T> {
     /// Opens a cloud optimistic transaction database.
@@ -215,12 +207,6 @@ impl<T: ThreadMode> CloudOptimisticTransactionDB<T> {
             path.as_ref().to_path_buf(),
             outlive,
         ))
-    }
-
-    /// Flushes all memtables to ensure data is persisted to cloud storage.
-    /// Note: The database handle is released when this CloudOptimisticTransactionDB is dropped.
-    pub fn flush(&self) -> Result<(), Error> {
-        self.inner.flush()
     }
 
     /// Capture a fork point: the current epoch, next file number, and

@@ -157,3 +157,30 @@ jobs:
       - name: Mark working directory as writable
         if: runner.os == 'Linux'
         run: chmod -R a+w .
+
+  build-aws:
+    name: Build (AWS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          submodules: recursive
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-on-failure: true
+      - name: Install AWS SDK C++ build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev uuid-dev zlib1g-dev cmake
+      - name: Build and install AWS SDK C++
+        run: |
+          git clone --recurse-submodules --single-branch --depth 1 --branch 1.11.780 https://github.com/aws/aws-sdk-cpp.git
+          mkdir aws-sdk-cpp/build && cd aws-sdk-cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DBUILD_ONLY="s3;core;transfer" -DCMAKE_INSTALL_PREFIX=/usr/local/
+          make -j$(nproc)
+          sudo make install
+      - name: Build with aws feature
+        run: cargo build --features aws
