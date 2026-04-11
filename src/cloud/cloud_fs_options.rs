@@ -450,10 +450,10 @@ impl CloudFileSystemOptions {
         unsafe { ffi::rocksdb_cloud_fs_options_get_background_wal_sync_interval_ms(self.inner) }
     }
 
-    /// When true and `background_wal_sync_to_cloud` is enabled, only new
-    /// bytes since the last upload are written as separate delta objects
-    /// rather than re-uploading the entire WAL file. Recovery reassembles
-    /// deltas in order.
+    // When true and `background_wal_sync_to_cloud` is enabled, only new
+    // bytes since the last upload are written as separate delta objects
+    // rather than re-uploading the entire WAL file. Recovery reassembles
+    // deltas in order.
     cloud_fs_bool_option!(
         set_use_wal_delta_upload,
         get_use_wal_delta_upload,
@@ -538,5 +538,17 @@ impl CloudFileSystemOptions {
                 fairness,
             );
         }
+    }
+
+    /// Set a custom S3-compatible endpoint URL (e.g. `http://localhost:9200` for MinIO).
+    ///
+    /// When set, the AWS SDK connects to this endpoint instead of the default
+    /// AWS S3 endpoint for the configured region.
+    pub fn set_endpoint_override(&mut self, endpoint: impl CStrLike) -> &mut Self {
+        let endpoint = endpoint.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_endpoint_override(self.inner, endpoint.as_ptr());
+        }
+        self
     }
 }

@@ -874,7 +874,7 @@ impl<T: ThreadMode> CloudTransactionDB<T> {
         DBRawIteratorWithThreadMode::new_cf(self, cf_handle.inner(), readopts)
     }
 
-    pub fn snapshot(&self) -> SnapshotWithThreadMode<Self> {
+    pub fn snapshot(&self) -> SnapshotWithThreadMode<'_, Self> {
         SnapshotWithThreadMode::<Self>::new(self)
     }
 
@@ -944,7 +944,7 @@ impl CloudTransactionDB<MultiThreaded> {
         Ok(())
     }
 
-    pub fn cf_handle(&self, name: &str) -> Option<Arc<BoundColumnFamily>> {
+    pub fn cf_handle(&self, name: &str) -> Option<Arc<BoundColumnFamily<'_>>> {
         self.cfs
             .cfs
             .read()
