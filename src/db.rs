@@ -1454,11 +1454,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
     /// Return the values and matched timestamps associated with the given keys.
     /// Each entry in the returned vector is `(Option<value>, Option<matched_timestamp>)`.
-    pub fn multi_get_with_ts_opt<K, I>(
-        &self,
-        keys: I,
-        readopts: &ReadOptions,
-    ) -> Vec<ValueWithTs>
+    pub fn multi_get_with_ts_opt<K, I>(&self, keys: I, readopts: &ReadOptions) -> Vec<ValueWithTs>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
