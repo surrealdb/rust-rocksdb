@@ -539,4 +539,16 @@ impl CloudFileSystemOptions {
             );
         }
     }
+
+    /// Set a custom S3-compatible endpoint URL (e.g. `http://localhost:9200` for MinIO).
+    ///
+    /// When set, the AWS SDK connects to this endpoint instead of the default
+    /// AWS S3 endpoint for the configured region.
+    pub fn set_endpoint_override(&mut self, endpoint: impl CStrLike) -> &mut Self {
+        let endpoint = endpoint.into_c_string().unwrap();
+        unsafe {
+            ffi::rocksdb_cloud_fs_options_set_endpoint_override(self.inner, endpoint.as_ptr());
+        }
+        self
+    }
 }
