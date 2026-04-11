@@ -407,6 +407,29 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         }
     }
 
+    /// Removes the database entry in the specific column family with timestamp for key,
+    /// if it has been written exactly once (since its last deletion). Undefined behavior
+    /// if the key has been written more than once.
+    pub fn singledelete_cf_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        ts: S,
+    ) {
+        let key = key.as_ref();
+        let ts = ts.as_ref();
+        unsafe {
+            ffi::rocksdb_writebatch_singledelete_cf_with_ts(
+                self.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            );
+        }
+    }
+
     // Append a blob of arbitrary size to the records in this batch. The blob will
     // be stored in the transaction log but not in any other file. In particular,
     // it will not be persisted to the SST files. When iterating over this

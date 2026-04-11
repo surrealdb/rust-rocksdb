@@ -1171,6 +1171,48 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         self.get_cf_opt(cf, key.as_ref(), &ReadOptions::default())
     }
 
+    /// Return the bytes associated with a key value, along with the matched timestamp via
+    /// `rocksdb_get_with_ts`. Returns a tuple of `(Option<value>, Option<matched_timestamp>)`.
+    pub fn get_with_ts_opt<K: AsRef<[u8]>>(&self, key: K, readopts: &ReadOptions) -> ValueWithTs {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        unsafe {
+            let mut val_len: size_t = 0;
+            let mut ts_ptr: *mut c_char = ptr::null_mut();
+            let mut ts_len: size_t = 0;
+            let mut err: *mut c_char = ptr::null_mut();
+            let val = ffi::rocksdb_get_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &mut val_len,
+                &mut ts_ptr,
+                &mut ts_len,
+                &mut err,
+            );
+            if !err.is_null() {
+                return Err(convert_rocksdb_error(err));
+            }
+            let value = raw_data(val, val_len);
+            let timestamp = raw_data(ts_ptr, ts_len);
+            if !val.is_null() {
+                ffi::rocksdb_free(val as *mut c_void);
+            }
+            if !ts_ptr.is_null() {
+                ffi::rocksdb_free(ts_ptr as *mut c_void);
+            }
+            Ok((value, timestamp))
+        }
+    }
+
     /// Return the bytes associated with a key value and the given column family, along with the
     /// matched timestamp via `rocksdb_get_cf_with_ts`. Returns a tuple of
     /// `(Option<value>, Option<matched_timestamp>)`.
@@ -1408,6 +1450,102 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
 
         convert_values(values, values_sizes, errors)
+    }
+
+    /// Return the values and matched timestamps associated with the given keys.
+    /// Each entry in the returned vector is `(Option<value>, Option<matched_timestamp>)`.
+    pub fn multi_get_with_ts_opt<K, I>(
+        &self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<ValueWithTs>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
+            .into_iter()
+            .map(|k| {
+                let k = k.as_ref();
+                (Box::from(k), k.len())
+            })
+            .unzip();
+        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
+
+        let mut values = vec![ptr::null_mut(); keys.len()];
+        let mut values_sizes = vec![0_usize; keys.len()];
+        let mut timestamps = vec![ptr::null_mut(); keys.len()];
+        let mut timestamps_sizes = vec![0_usize; keys.len()];
+        let mut errors = vec![ptr::null_mut(); keys.len()];
+        unsafe {
+            ffi::rocksdb_multi_get_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                ptr_keys.len(),
+                ptr_keys.as_ptr(),
+                keys_sizes.as_ptr(),
+                values.as_mut_ptr(),
+                values_sizes.as_mut_ptr(),
+                timestamps.as_mut_ptr(),
+                timestamps_sizes.as_mut_ptr(),
+                errors.as_mut_ptr(),
+            );
+        }
+
+        convert_values_with_ts(values, values_sizes, timestamps, timestamps_sizes, errors)
+    }
+
+    /// Return the values and matched timestamps associated with the given keys and column
+    /// families. Each entry in the returned vector is
+    /// `(Option<value>, Option<matched_timestamp>)`.
+    pub fn multi_get_cf_with_ts_opt<'a, 'b: 'a, K, I, W>(
+        &'a self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<ValueWithTs>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: 'b + AsColumnFamilyRef,
+    {
+        let (cfs_and_keys, keys_sizes): (Vec<(_, Box<[u8]>)>, Vec<_>) = keys
+            .into_iter()
+            .map(|(cf, key)| {
+                let key = key.as_ref();
+                ((cf, Box::from(key)), key.len())
+            })
+            .unzip();
+        let ptr_keys: Vec<_> = cfs_and_keys
+            .iter()
+            .map(|(_, k)| k.as_ptr() as *const c_char)
+            .collect();
+        let ptr_cfs: Vec<_> = cfs_and_keys
+            .iter()
+            .map(|(c, _)| c.inner().cast_const())
+            .collect();
+
+        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
+        let mut values_sizes = vec![0_usize; ptr_keys.len()];
+        let mut timestamps = vec![ptr::null_mut(); ptr_keys.len()];
+        let mut timestamps_sizes = vec![0_usize; ptr_keys.len()];
+        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
+        unsafe {
+            ffi::rocksdb_multi_get_cf_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                ptr_cfs.as_ptr(),
+                ptr_keys.len(),
+                ptr_keys.as_ptr(),
+                keys_sizes.as_ptr(),
+                values.as_mut_ptr(),
+                values_sizes.as_mut_ptr(),
+                timestamps.as_mut_ptr(),
+                timestamps_sizes.as_mut_ptr(),
+                errors.as_mut_ptr(),
+            );
+        }
+
+        convert_values_with_ts(values, values_sizes, timestamps, timestamps_sizes, errors)
     }
 
     /// Return the values associated with the given keys and the specified column family
@@ -2001,6 +2139,67 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
+    /// Remove the database entry for "key" if it has been written exactly once (since its
+    /// last deletion). Undefined behavior if the key has been written more than once.
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn singledelete_with_ts_opt<K, S>(
+        &self,
+        key: K,
+        ts: S,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let key = key.as_ref();
+        let ts = ts.as_ref();
+        unsafe {
+            ffi_try!(ffi::rocksdb_singledelete_with_ts(
+                self.inner.inner(),
+                writeopts.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Remove the database entry in a specific column family for "key" if it has been
+    /// written exactly once (since its last deletion). Undefined behavior if the key has
+    /// been written more than once.
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn singledelete_cf_with_ts_opt<K, S>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        ts: S,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let key = key.as_ref();
+        let ts = ts.as_ref();
+        unsafe {
+            ffi_try!(ffi::rocksdb_singledelete_cf_with_ts(
+                self.inner.inner(),
+                writeopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
     pub fn put<K, V>(&self, key: K, value: V) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
@@ -2113,6 +2312,30 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         ts: S,
     ) -> Result<(), Error> {
         self.delete_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), &WriteOptions::default())
+    }
+
+    /// Remove the database entry for "key" if it has been written exactly once (since its
+    /// last deletion). Undefined behavior if the key has been written more than once.
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn singledelete_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &self,
+        key: K,
+        ts: S,
+    ) -> Result<(), Error> {
+        self.singledelete_with_ts_opt(key.as_ref(), ts.as_ref(), &WriteOptions::default())
+    }
+
+    /// SingleDelete with timestamp in a specific column family.
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn singledelete_cf_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        ts: S,
+    ) -> Result<(), Error> {
+        self.singledelete_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), &WriteOptions::default())
     }
 
     /// Runs a manual compaction on the Range of keys given. This is not likely to be needed for typical usage.
@@ -2922,6 +3145,34 @@ pub(crate) fn convert_values(
                     ffi::rocksdb_free(v as *mut c_void);
                 }
                 Ok(value)
+            } else {
+                Err(convert_rocksdb_error(e))
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn convert_values_with_ts(
+    values: Vec<*mut c_char>,
+    values_sizes: Vec<usize>,
+    timestamps: Vec<*mut c_char>,
+    timestamps_sizes: Vec<usize>,
+    errors: Vec<*mut c_char>,
+) -> Vec<ValueWithTs> {
+    values
+        .into_iter()
+        .zip(values_sizes)
+        .zip(timestamps.into_iter().zip(timestamps_sizes))
+        .zip(errors)
+        .map(|(((v, vs), (t, ts)), e)| {
+            if e.is_null() {
+                let value = unsafe { crate::ffi_util::raw_data(v, vs) };
+                let timestamp = unsafe { crate::ffi_util::raw_data(t, ts) };
+                unsafe {
+                    ffi::rocksdb_free(v as *mut c_void);
+                    ffi::rocksdb_free(t as *mut c_void);
+                }
+                Ok((value, timestamp))
             } else {
                 Err(convert_rocksdb_error(e))
             }

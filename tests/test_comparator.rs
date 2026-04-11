@@ -1,6 +1,6 @@
 mod util;
 
-use rocksdb::{CompactOptions, Options, ReadOptions, DB};
+use rocksdb::{CompactOptions, Options, ReadOptions, WriteBatch, WriteOptions, DB};
 use std::cmp::Ordering;
 use std::iter::FromIterator;
 use util::{U64Comparator, U64Timestamp};
@@ -358,6 +358,292 @@ fn test_get_cf_with_ts_opt() {
         let (value, matched_ts) = db.get_cf_with_ts_opt(&cf, b"missing", &opts).unwrap();
         assert!(value.is_none());
         assert!(matched_ts.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
+
+#[test]
+fn test_get_with_ts_opt() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_get_with_ts_opt")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_if_missing(true);
+        db_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let db = DB::open(&db_opts, path).unwrap();
+
+        let key = b"hello";
+        let val1 = b"world0";
+        let val2 = b"world1";
+
+        let ts1 = U64Timestamp::new(1);
+        let ts2 = U64Timestamp::new(2);
+
+        db.put_with_ts(key, ts1, val1).unwrap();
+        db.put_with_ts(key, ts2, val2).unwrap();
+
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts2);
+        let (value, matched_ts) = db.get_with_ts_opt(key, &opts).unwrap();
+        assert_eq!(value.unwrap().as_slice(), val2);
+        assert_eq!(U64Timestamp::from(matched_ts.unwrap().as_slice()), ts2);
+
+        opts.set_timestamp(ts1);
+        let (value, matched_ts) = db.get_with_ts_opt(key, &opts).unwrap();
+        assert_eq!(value.unwrap().as_slice(), val1);
+        assert_eq!(U64Timestamp::from(matched_ts.unwrap().as_slice()), ts1);
+
+        opts.set_timestamp(ts2);
+        let (value, matched_ts) = db.get_with_ts_opt(b"missing", &opts).unwrap();
+        assert!(value.is_none());
+        assert!(matched_ts.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
+
+#[test]
+fn test_multi_get_with_ts_opt() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_multi_get_with_ts_opt")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_if_missing(true);
+        db_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let db = DB::open(&db_opts, path).unwrap();
+
+        let ts1 = U64Timestamp::new(1);
+        db.put_with_ts(b"k1", ts1, b"v1").unwrap();
+        db.put_with_ts(b"k2", ts1, b"v2").unwrap();
+
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts1);
+        let results =
+            db.multi_get_with_ts_opt([b"k1".as_ref(), b"k2".as_ref(), b"k3".as_ref()], &opts);
+        assert_eq!(results.len(), 3);
+
+        let (val, ts) = results[0].as_ref().unwrap();
+        assert_eq!(val.as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(U64Timestamp::from(ts.as_deref().unwrap()), ts1);
+
+        let (val, ts) = results[1].as_ref().unwrap();
+        assert_eq!(val.as_deref(), Some(b"v2".as_ref()));
+        assert_eq!(U64Timestamp::from(ts.as_deref().unwrap()), ts1);
+
+        let (val, ts) = results[2].as_ref().unwrap();
+        assert!(val.is_none());
+        assert!(ts.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
+
+#[test]
+fn test_multi_get_cf_with_ts_opt() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_multi_get_cf_with_ts_opt")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_missing_column_families(true);
+        db_opts.create_if_missing(true);
+
+        let mut cf_opts = Options::default();
+        cf_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let cfs = vec![("cf", cf_opts)];
+        let db = DB::open_cf_with_opts(&db_opts, path, cfs).unwrap();
+        let cf = db.cf_handle("cf").unwrap();
+
+        let ts1 = U64Timestamp::new(1);
+        db.put_cf_with_ts(&cf, b"k1", ts1, b"v1").unwrap();
+        db.put_cf_with_ts(&cf, b"k2", ts1, b"v2").unwrap();
+
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts1);
+        let results = db.multi_get_cf_with_ts_opt(
+            [
+                (&cf, b"k1".as_ref()),
+                (&cf, b"k2".as_ref()),
+                (&cf, b"k3".as_ref()),
+            ],
+            &opts,
+        );
+        assert_eq!(results.len(), 3);
+
+        let (val, ts) = results[0].as_ref().unwrap();
+        assert_eq!(val.as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(U64Timestamp::from(ts.as_deref().unwrap()), ts1);
+
+        let (val, ts) = results[1].as_ref().unwrap();
+        assert_eq!(val.as_deref(), Some(b"v2".as_ref()));
+        assert_eq!(U64Timestamp::from(ts.as_deref().unwrap()), ts1);
+
+        let (val, ts) = results[2].as_ref().unwrap();
+        assert!(val.is_none());
+        assert!(ts.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
+
+#[test]
+fn test_singledelete_with_ts() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_singledelete_with_ts")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_if_missing(true);
+        db_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let db = DB::open(&db_opts, path).unwrap();
+
+        let ts1 = U64Timestamp::new(1);
+        let ts2 = U64Timestamp::new(2);
+        let ts3 = U64Timestamp::new(3);
+
+        db.put_with_ts(b"k1", ts1, b"v1").unwrap();
+        db.singledelete_with_ts(b"k1", ts2).unwrap();
+
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts3);
+        let (value, _) = db.get_with_ts_opt(b"k1", &opts).unwrap();
+        assert!(value.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
+
+#[test]
+fn test_singledelete_cf_with_ts() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_singledelete_cf_with_ts")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_missing_column_families(true);
+        db_opts.create_if_missing(true);
+
+        let mut cf_opts = Options::default();
+        cf_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let cfs = vec![("cf", cf_opts)];
+        let db = DB::open_cf_with_opts(&db_opts, path, cfs).unwrap();
+        let cf = db.cf_handle("cf").unwrap();
+
+        let ts1 = U64Timestamp::new(1);
+        let ts2 = U64Timestamp::new(2);
+        let ts3 = U64Timestamp::new(3);
+
+        db.put_cf_with_ts(&cf, b"k1", ts1, b"v1").unwrap();
+        db.singledelete_cf_with_ts(&cf, b"k1", ts2).unwrap();
+
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts3);
+        let (value, _) = db.get_cf_with_ts_opt(&cf, b"k1", &opts).unwrap();
+        assert!(value.is_none());
+    }
+
+    let _ = DB::destroy(&Options::default(), path);
+}
+
+#[test]
+fn test_writebatch_singledelete_cf_with_ts() {
+    let tempdir = tempfile::Builder::new()
+        .prefix("_path_for_rocksdb_storage_writebatch_singledelete_cf_with_ts")
+        .tempdir()
+        .expect("Failed to create temporary path.");
+    let path = tempdir.path();
+    let _ = DB::destroy(&Options::default(), path);
+
+    {
+        let mut db_opts = Options::default();
+        db_opts.create_missing_column_families(true);
+        db_opts.create_if_missing(true);
+
+        let mut cf_opts = Options::default();
+        cf_opts.set_comparator_with_ts(
+            U64Comparator::NAME,
+            U64Timestamp::SIZE,
+            Box::new(U64Comparator::compare),
+            Box::new(U64Comparator::compare_ts),
+            Box::new(U64Comparator::compare_without_ts),
+        );
+
+        let cfs = vec![("cf", cf_opts)];
+        let db = DB::open_cf_with_opts(&db_opts, path, cfs).unwrap();
+        let cf = db.cf_handle("cf").unwrap();
+
+        let ts1 = U64Timestamp::new(1);
+        let ts2 = U64Timestamp::new(2);
+        let ts3 = U64Timestamp::new(3);
+
+        db.put_cf_with_ts(&cf, b"k1", ts1, b"v1").unwrap();
+
+        let mut batch = WriteBatch::default();
+        batch.singledelete_cf_with_ts(&cf, b"k1", ts2);
+        db.write_opt(batch, &WriteOptions::default()).unwrap();
+
+        let mut opts = ReadOptions::default();
+        opts.set_timestamp(ts3);
+        let (value, _) = db.get_cf_with_ts_opt(&cf, b"k1", &opts).unwrap();
+        assert!(value.is_none());
     }
 
     let _ = DB::destroy(&Options::default(), path);
