@@ -309,6 +309,10 @@ impl Drop for DBWithThreadModeInner {
     }
 }
 
+/// The return type for get operations that also return a matched timestamp.
+/// The tuple contains `(Option<value>, Option<matched_timestamp>)`.
+pub type ValueWithTs = Result<(Option<Vec<u8>>, Option<Vec<u8>>), Error>;
+
 /// A type alias to RocksDB database.
 ///
 /// See crate level documentation for a simple usage example.
@@ -1165,6 +1169,55 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
     ) -> Result<Option<Vec<u8>>, Error> {
         self.get_cf_opt(cf, key.as_ref(), &ReadOptions::default())
+    }
+
+    /// Return the bytes associated with a key value and the given column family, along with the
+    /// matched timestamp via `rocksdb_get_cf_with_ts`. Returns a tuple of
+    /// `(Option<value>, Option<matched_timestamp>)`.
+    pub fn get_cf_with_ts_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        readopts: &ReadOptions,
+    ) -> ValueWithTs {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        unsafe {
+            let mut val_len: size_t = 0;
+            let mut ts_ptr: *mut c_char = ptr::null_mut();
+            let mut ts_len: size_t = 0;
+            let mut err: *mut c_char = ptr::null_mut();
+            let val = ffi::rocksdb_get_cf_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &mut val_len,
+                &mut ts_ptr,
+                &mut ts_len,
+                &mut err,
+            );
+            if !err.is_null() {
+                return Err(convert_rocksdb_error(err));
+            }
+            let value = raw_data(val, val_len);
+            let timestamp = raw_data(ts_ptr, ts_len);
+            if !val.is_null() {
+                ffi::rocksdb_free(val as *mut c_void);
+            }
+            if !ts_ptr.is_null() {
+                ffi::rocksdb_free(ts_ptr as *mut c_void);
+            }
+            Ok((value, timestamp))
+        }
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
