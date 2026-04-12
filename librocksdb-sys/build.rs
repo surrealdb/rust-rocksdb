@@ -209,15 +209,18 @@ fn build_rocksdb() {
         config.define("USE_AWS", Some("1"));
         config.define("HAS_AWS_SDK", Some("1"));
 
+        // Add AWS SDK headers for C++ compilation
+        let aws_sdk = aws_sdk_install_dir();
+        let aws_include = aws_sdk.join("include");
+        if aws_include.exists() {
+            config.include(&aws_include);
+        }
+
         lib_sources.extend(&[
             "cloud/aws/aws_file_system.cc",
             "cloud/aws/aws_s3.cc",
             "cloud/aws/aws_retry.cc",
         ]);
-
-        println!("cargo:rustc-link-lib=aws-cpp-sdk-s3");
-        println!("cargo:rustc-link-lib=aws-cpp-sdk-core");
-        println!("cargo:rustc-link-lib=aws-cpp-sdk-transfer");
     }
 
     if cfg!(feature = "gcs") {
@@ -536,6 +539,81 @@ fn try_to_find_and_link_lib(lib_name: &str) -> bool {
     false
 }
 
+/// Locates the AWS SDK install directory.
+/// Checks `AWS_SDK_INSTALL_DIR` env var first, then falls back to `.do-not-commit/aws-sdk-install`.
+/// Panics if not found — run `scripts/init_deps.sh` to build the SDK.
+fn aws_sdk_install_dir() -> PathBuf {
+    println!("cargo:rerun-if-env-changed=AWS_SDK_INSTALL_DIR");
+    if let Ok(dir) = env::var("AWS_SDK_INSTALL_DIR") {
+        return PathBuf::from(dir);
+    }
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let default = Path::new(&manifest_dir).join("../.do-not-commit/aws-sdk-install");
+    if default.exists() {
+        return default.canonicalize().unwrap();
+    }
+    panic!(
+        "AWS SDK not found. Set AWS_SDK_INSTALL_DIR or run scripts/init_deps.sh.\n\
+         Expected at: {:?}",
+        default
+    );
+}
+
+/// Links the AWS C++ SDK libraries (static) and their transitive dependencies.
+fn link_aws_sdk(aws_sdk: &Path) {
+    let target = env::var("TARGET").unwrap();
+
+    // Find the lib directory (could be lib/ or lib64/)
+    let lib_dir = if aws_sdk.join("lib64").exists() {
+        aws_sdk.join("lib64")
+    } else {
+        aws_sdk.join("lib")
+    };
+
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+
+    // AWS SDK libraries (order matters for static linking)
+    println!("cargo:rustc-link-lib=static=aws-cpp-sdk-s3");
+    println!("cargo:rustc-link-lib=static=aws-cpp-sdk-transfer");
+    println!("cargo:rustc-link-lib=static=aws-cpp-sdk-core");
+
+    // AWS C common libraries (transitive dependencies of the C++ SDK)
+    let aws_c_libs = [
+        "aws-crt-cpp",
+        "aws-c-mqtt",
+        "aws-c-event-stream",
+        "aws-c-s3",
+        "aws-c-auth",
+        "aws-c-http",
+        "aws-c-io",
+        "aws-c-cal",
+        "aws-checksums",
+        "aws-c-compression",
+        "aws-c-sdkutils",
+        "aws-c-common",
+        "s2n",
+    ];
+
+    for lib in &aws_c_libs {
+        let lib_path_a = lib_dir.join(format!("lib{lib}.a"));
+        if lib_path_a.exists() {
+            println!("cargo:rustc-link-lib=static={lib}");
+        }
+    }
+
+    // System libraries
+    println!("cargo:rustc-link-lib=dylib=curl");
+    println!("cargo:rustc-link-lib=dylib=ssl");
+    println!("cargo:rustc-link-lib=dylib=crypto");
+
+    if target.contains("linux") {
+        println!("cargo:rustc-link-lib=dylib=pthread");
+        println!("cargo:rustc-link-lib=dylib=dl");
+        println!("cargo:rustc-link-lib=dylib=rt");
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
+}
+
 /// Returns the value of the `ROCKSDB_CXX_STD` env var, or the default `-std=c++{version}` flag for
 /// building RocksDB.
 fn cxx_standard() -> String {
@@ -609,6 +687,11 @@ fn main() {
     } else {
         cpp_link_stdlib(&target);
     }
+    if cfg!(feature = "aws") {
+        let aws_sdk = aws_sdk_install_dir();
+        link_aws_sdk(&aws_sdk);
+    }
+
     if cfg!(feature = "snappy") && !try_to_find_and_link_lib("SNAPPY") {
         println!("cargo:rerun-if-changed=snappy/");
         fail_on_empty_directory("snappy");
