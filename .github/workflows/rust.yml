@@ -174,13 +174,22 @@ jobs:
         with:
           cache-on-failure: true
       - name: Install AWS SDK C++ build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev uuid-dev zlib1g-dev cmake
-      - name: Build and install AWS SDK C++
-        run: |
-          git clone --recurse-submodules --single-branch --depth 1 --branch 1.11.780 https://github.com/aws/aws-sdk-cpp.git
-          mkdir aws-sdk-cpp/build && cd aws-sdk-cpp/build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DBUILD_ONLY="s3;core;transfer" -DCMAKE_INSTALL_PREFIX=/usr/local/
-          make -j$(nproc)
-          sudo make install
+        run: sudo apt-get update && sudo apt-get install -y cmake libcurl4-openssl-dev libssl-dev
+      - name: Restore AWS C++ SDK cache
+        id: cache-aws-sdk
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .do-not-commit/aws-sdk-install
+          key: aws-cpp-sdk-${{ runner.os }}-${{ hashFiles('scripts/init_deps.sh') }}
+      - name: Build AWS C++ SDK
+        id: build-aws-sdk
+        if: steps.cache-aws-sdk.outputs.cache-hit != 'true'
+        run: bash scripts/init_deps.sh
+      - name: Save AWS C++ SDK cache
+        if: steps.build-aws-sdk.outcome == 'success'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .do-not-commit/aws-sdk-install
+          key: aws-cpp-sdk-${{ runner.os }}-${{ hashFiles('scripts/init_deps.sh') }}
       - name: Build with aws feature
         run: cargo build --features aws
