@@ -976,6 +976,90 @@ impl BlockBasedOptions {
             );
         }
     }
+
+    /// Set the maximum readahead size for RocksDB's implicit (auto) readahead
+    /// on iterators.
+    ///
+    /// RocksDB does auto-readahead for iterators on noticing more than two
+    /// reads for a table file if the user doesn't provide `readahead_size`.
+    /// The readahead starts at `initial_auto_readahead_size` (default: 8 KB)
+    /// and doubles on every additional read up to `max_auto_readahead_size`.
+    ///
+    /// Special value `0` disables the implicit auto prefetching. If
+    /// `max_auto_readahead_size` is smaller than `initial_auto_readahead_size`,
+    /// RocksDB will sanitize `initial_auto_readahead_size` down to
+    /// `max_auto_readahead_size`.
+    ///
+    /// Default: 256 KB (`256 * 1024`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rocksdb::BlockBasedOptions;
+    ///
+    /// let mut opts = BlockBasedOptions::default();
+    /// opts.set_max_auto_readahead_size(4 * 1024 * 1024); // 4 MB cap
+    /// ```
+    pub fn set_max_auto_readahead_size(&mut self, size: usize) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_max_auto_readahead_size(self.inner, size);
+        }
+    }
+
+    /// Set the initial readahead size for RocksDB's implicit (auto) readahead
+    /// on iterators.
+    ///
+    /// RocksDB does auto-readahead for iterators on noticing more than two
+    /// reads for a table file if the user doesn't provide `readahead_size`.
+    /// The readahead starts at `initial_auto_readahead_size` and doubles on
+    /// every additional read up to `max_auto_readahead_size`.
+    ///
+    /// Special values:
+    /// - `0`: disables the implicit auto prefetching irrespective of
+    ///   `max_auto_readahead_size`.
+    /// - If `initial_auto_readahead_size` > `max_auto_readahead_size`, RocksDB
+    ///   will sanitize it down to `max_auto_readahead_size`.
+    ///
+    /// Default: 8 KB (`8 * 1024`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rocksdb::BlockBasedOptions;
+    ///
+    /// let mut opts = BlockBasedOptions::default();
+    /// opts.set_initial_auto_readahead_size(32 * 1024); // 32 KB initial
+    /// ```
+    pub fn set_initial_auto_readahead_size(&mut self, size: usize) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_initial_auto_readahead_size(self.inner, size);
+        }
+    }
+
+    /// Set how many sequential file reads must occur before RocksDB starts
+    /// the internal auto prefetcher for an iterator.
+    ///
+    /// For example, if the value is `2` then after reading 2 sequential data
+    /// blocks, on the third data block prefetching will start. If set to `0`,
+    /// prefetching starts from the first read.
+    ///
+    /// Default: `2`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rocksdb::BlockBasedOptions;
+    ///
+    /// let mut opts = BlockBasedOptions::default();
+    /// opts.set_num_file_reads_for_auto_readahead(0); // prefetch from the start
+    /// ```
+    pub fn set_num_file_reads_for_auto_readahead(&mut self, num_reads: u64) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_num_file_reads_for_auto_readahead(
+                self.inner, num_reads,
+            );
+        }
+    }
 }
 
 impl Default for BlockBasedOptions {

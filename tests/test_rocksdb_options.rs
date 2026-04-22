@@ -512,6 +512,38 @@ fn test_block_based_table_pinning_tier() {
 }
 
 #[test]
+fn test_block_based_auto_readahead_setters() {
+    let path = DBPath::new("_block_based_auto_readahead_setters");
+
+    let mut block_opts = BlockBasedOptions::default();
+    block_opts.set_max_auto_readahead_size(4 * 1024 * 1024);
+    block_opts.set_initial_auto_readahead_size(32 * 1024);
+    block_opts.set_num_file_reads_for_auto_readahead(0);
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.set_block_based_table_factory(&block_opts);
+
+    let db = DB::open(&opts, &path).unwrap();
+    db.put(b"test_key", b"test_value").unwrap();
+    assert_eq!(&*db.get(b"test_key").unwrap().unwrap(), b"test_value");
+
+    let settings = read_settings_from_log(&path);
+    assert!(
+        settings.contains("max_auto_readahead_size: 4194304"),
+        "expected max_auto_readahead_size=4194304 in LOG, got: {settings}"
+    );
+    assert!(
+        settings.contains("initial_auto_readahead_size: 32768"),
+        "expected initial_auto_readahead_size=32768 in LOG, got: {settings}"
+    );
+    assert!(
+        settings.contains("num_file_reads_for_auto_readahead: 0"),
+        "expected num_file_reads_for_auto_readahead=0 in LOG, got: {settings}"
+    );
+}
+
+#[test]
 fn jemalloc_init() {
     let path = DBPath::new("_jemalloc_init");
     {

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Expose `BlockBasedOptions::set_max_auto_readahead_size`,
+  `set_initial_auto_readahead_size` and `set_num_file_reads_for_auto_readahead`,
+  allowing the implicit iterator readahead to be tuned (e.g. raising the
+  adaptive cap from the default 256 KB) without switching to a fixed
+  `ReadOptions::readahead_size`. Adds the corresponding
+  `rocksdb_block_based_options_set_*` FFI bindings in `librocksdb-sys`.
+
 ## 0.24.0-surreal.1 (2026-03-02)
 
 This is the SurrealDB fork of rust-rocksdb, based on upstream version 0.24.0.
