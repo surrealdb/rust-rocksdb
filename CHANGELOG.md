@@ -1,15 +1,90 @@
 # Changelog
 
-## Unreleased
+## 0.24.0-surreal.4 (2026-04-23)
 
 ### Features
 
 - Expose `BlockBasedOptions::set_max_auto_readahead_size`,
   `set_initial_auto_readahead_size` and `set_num_file_reads_for_auto_readahead`,
-  allowing the implicit iterator readahead to be tuned (e.g. raising the
+  allowing the implicit iterator readahead to be tuned (for example raising the
   adaptive cap from the default 256 KB) without switching to a fixed
   `ReadOptions::readahead_size`. Adds the corresponding
-  `rocksdb_block_based_options_set_*` FFI bindings in `librocksdb-sys`.
+  `rocksdb_block_based_options_set_*` C FFI entry points in the bundled RocksDB
+  sources and integration tests that assert the options appear in the DB `LOG`.
+
+### Improvements
+
+- Improve the AWS-related build script for cloud dependencies (`#6`).
+
+### Dependency updates
+
+- Bump `surrealdb-rocksdb` to `0.24.0-surreal.4` and `surrealdb-librocksdb-sys` to
+  `0.18.2+11.0.0-3`.
+- Pin the `rocksdb` submodule to `surrealdb/rocksdb@30830a370` on branch
+  `cloud/11.0.0-3` (includes the new C API above). Update `.gitmodules` to track
+  `cloud/11.0.0-3`.
+
+## 0.24.0-surreal.3 (2026-04-12)
+
+### Features
+
+- Cloud read replicas with WAL source configuration.
+- Incremental WAL cloud upload with delta mode.
+- Document Kafka WAL recovery on startup.
+- Add `get_cf_with_ts_opt` and complete remaining timestamp-aware column family
+  read APIs in the Rust bindings.
+- Complete Rust bindings for WAL-related cloud file system options (including
+  `WalKafkaSyncMode`, getters/setters, round-trip tests, and `CLOUD.md`
+  documentation).
+
+### Improvements
+
+- Refresh `CLOUD.md` with updated feature examples.
+- Update the GitHub Actions release workflow; minor formatting fixes.
+- Fix AWS-related build issues in the cloud build (`#5`).
+
+### Dependency updates
+
+- Bump the bundled `rocksdb` submodule and `.gitmodules` (RocksDB cloud
+  `11.0.0-2` line).
+- Release `surrealdb-librocksdb-sys` `0.18.1+11.0.0-2` and `surrealdb-rocksdb`
+  `0.24.0-surreal.3`.
+
+## 0.24.0-surreal.2 (2026-03-25)
+
+### Features
+
+- Integrate RocksDB cloud: build system, `CloudDB`, `CloudTransactionDB`, and
+  `CloudOptimisticTransactionDB` bindings.
+- Optional Google Cloud Storage and encryption backends and their build flags.
+- Cloud-oriented configuration: WAL sync, fork-point snapshot API, bandwidth
+  throttling, cross-region replication bucket bindings.
+- User-defined timestamps for optimistic transactions.
+- Additional APIs: `DB::resume`, `SstFileManager`, `Iterator::refresh`, cold-start
+  optimisation bindings, and zero-copy branching bindings for cloud databases.
+- Documentation for cloud usage, read-only replicas, incremental `BackupEngine`
+  with object storage, cold start, and an extras changelog (`EXTRAS.md`).
+- Point the RocksDB submodule at branch `cloud/11.0.0-1`; refresh repository URLs
+  and crate metadata for the SurrealDB fork; add a `workflow_dispatch` release
+  workflow.
+
+### Bug fixes
+
+- Fix safety and consistency issues in cloud and encryption FFI bindings; fix a
+  flush-options leak when closing cloud DB handles.
+- Remove APIs deprecated in upstream RocksDB 11.0.0 from the fork surface.
+
+### Improvements
+
+- Add tests for cloud options and missing `local_sst_cache` sources in the
+  bundled tree.
+- Pin GitHub Actions to full-length commit SHAs; address clippy findings for
+  downstream crates.
+
+### Repository
+
+- First numbered pre-release after the fork rename (`0.24.0-surreal.2`); see
+  `0.24.0-surreal.1` for the initial fork packaging notes.
 
 ## 0.24.0-surreal.1 (2026-03-02)
 
