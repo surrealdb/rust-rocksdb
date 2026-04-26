@@ -499,6 +499,35 @@ impl WriteBatchWithTransaction<false> {
             );
         }
     }
+
+    /// Remove database entries in column family from start key to end key with timestamp.
+    ///
+    /// Removes the database entries in the range ["begin_key", "end_key"), i.e.,
+    /// including "begin_key" and excluding "end_key". It is not an error if no
+    /// keys exist in the range ["begin_key", "end_key").
+    pub fn delete_range_cf_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+        ts: S,
+    ) {
+        let (start_key, end_key) = (from.as_ref(), to.as_ref());
+        let ts = ts.as_ref();
+
+        unsafe {
+            ffi::rocksdb_writebatch_delete_range_cf_with_ts(
+                self.inner,
+                cf.inner(),
+                start_key.as_ptr() as *const c_char,
+                start_key.len() as size_t,
+                end_key.as_ptr() as *const c_char,
+                end_key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            );
+        }
+    }
 }
 
 impl<const TRANSACTION: bool> Default for WriteBatchWithTransaction<TRANSACTION> {
