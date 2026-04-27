@@ -945,6 +945,102 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         self.delete_range_cf_opt(cf, from, to, &WriteOptions::default())
     }
 
+    /// Removes the database entries in the range `["from", "to")` with timestamp
+    /// using given write options.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn delete_range_with_ts_opt<K, S>(
+        &self,
+        from: K,
+        to: K,
+        ts: S,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let from = from.as_ref();
+        let to = to.as_ref();
+        let ts = ts.as_ref();
+
+        unsafe {
+            ffi_try!(ffi::rocksdb_delete_range_with_ts(
+                self.inner.inner(),
+                writeopts.inner,
+                from.as_ptr() as *const c_char,
+                from.len() as size_t,
+                to.as_ptr() as *const c_char,
+                to.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Removes the database entries in the range `["from", "to")` with timestamp
+    /// in a specific column family using given write options.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn delete_range_cf_with_ts_opt<K, S>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+        ts: S,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let from = from.as_ref();
+        let to = to.as_ref();
+        let ts = ts.as_ref();
+
+        unsafe {
+            ffi_try!(ffi::rocksdb_delete_range_cf_with_ts(
+                self.inner.inner(),
+                writeopts.inner,
+                cf.inner(),
+                from.as_ptr() as *const c_char,
+                from.len() as size_t,
+                to.as_ptr() as *const c_char,
+                to.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Removes the database entries in the range `["from", "to")` with timestamp
+    /// using default write options.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn delete_range_with_ts<K, S>(&self, from: K, to: K, ts: S) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        self.delete_range_with_ts_opt(from, to, ts, &WriteOptions::default())
+    }
+
+    /// Removes the database entries in the range `["from", "to")` with timestamp
+    /// in a specific column family using default write options.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    pub fn delete_range_cf_with_ts<K, S>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+        ts: S,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        self.delete_range_cf_with_ts_opt(cf, from, to, ts, &WriteOptions::default())
+    }
+
     pub fn write_opt(&self, batch: WriteBatch, writeopts: &WriteOptions) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_write(
