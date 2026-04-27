@@ -4,4 +4,4 @@
 [submodule "rocksdb_sys/rocksdb"]
 	path = librocksdb-sys/rocksdb
 	url = https://github.com/surrealdb/rocksdb.git
-	branch = cloud/11.0.0-3
+	branch = cloud/11.0.0-4
